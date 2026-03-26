@@ -362,7 +362,7 @@ class DeckController:
                 f.write("\n")
             os.rename(tmp, CONFIG_FILE)
         except Exception as e:
-            print(f"[config] Failed to save: {e}")
+            logger.error("Config save failed: %s", e)
 
     def _color(self, key, fallback):
         """Get a color from config, falling back to the constant."""
@@ -566,7 +566,7 @@ class DeckController:
         w = int(disp_bounds.size.width)
         h = int(disp_bounds.size.height) - menu_bar_h - dock_h
 
-        print(f"[screen] Display at ({x}, {y}), {w}x{h}, menu_bar={menu_bar_h}px, dock={dock_h}px")
+        logger.info("Display at (%d, %d), %dx%d, menu_bar=%dpx, dock=%dpx", x, y, w, h, menu_bar_h, dock_h)
         return {"x": x, "y": y, "w": w, "h": h}
 
     def _init_fonts(self):
@@ -892,7 +892,7 @@ return output
         Remaining windows are matched to layout terminals by proximity."""
         term_wins = self._get_terminal_windows()
         if not term_wins:
-            print("[tile] No terminal windows found.")
+            logger.warning("No terminal windows found")
             return
 
         # Find the controller's own terminal window by TTY
@@ -905,7 +905,7 @@ return output
 
         # Place controller window in slot 14 (bottom-right, always single cell)
         if controller_win:
-            print(f"[tile] Controller terminal → slot 14")
+            logger.info("Controller terminal -> slot 14")
             self._move_window_to_rect(controller_win, self._grid_rect(GRID_SLOTS - 1))
 
         # Get terminal zones from layout
@@ -913,7 +913,7 @@ return output
         terminal_rects = {name: self._get_terminal_rect(name) for name in terminal_names}
 
         count = min(len(other_wins), len(terminal_names))
-        print(f"[tile] Found {len(term_wins)} terminal window(s), tiling {count} into layout '{self.config.get('layout', 'default')}'")
+        logger.info("Found %d terminal window(s), tiling %d into layout '%s'", len(term_wins), count, self.config.get('layout', 'default'))
 
         # Match windows to terminal zones by proximity
         assignments = self._match_windows_to_terminals(other_wins[:count], terminal_names, terminal_rects)
@@ -1039,7 +1039,7 @@ end tell
                             best_terminal = self._find_nearest_empty_terminal(win)
                             if best_terminal is not None:
                                 r = self._get_terminal_rect(best_terminal)
-                                print(f"[snap] Snapping window to {best_terminal}")
+                                logger.info("Snapping window to %s", best_terminal)
                                 self._move_window_to_rect(win, r)
                                 snapped_any = True
                         del self._snap_candidates[wid]
@@ -1267,6 +1267,7 @@ end tell
         )
 
         if tap is None:
+            logger.error("Failed to create event tap — check Accessibility permissions")
             print("  Failed to create event tap — check Accessibility permissions")
             return
 
@@ -1709,22 +1710,24 @@ end tell
 
         devices = DeviceManager().enumerate()
         if not devices:
+            logger.error("No Stream Deck found")
             print("No Stream Deck found. Make sure it's plugged in.")
             print("Also verify: brew install hidapi && pip install streamdeck")
             sys.exit(1)
 
         # The Stream Deck Original exposes multiple HID interfaces.
         # Try each until one opens successfully.
-        print(f"Found {len(devices)} HID interface(s), attempting to open...")
+        logger.info("Found %d HID interface(s), attempting to open...", len(devices))
         for i, dev in enumerate(devices):
             try:
                 dev.open()
                 self.deck = dev
-                print(f"  Opened interface {i}: {dev.deck_type()}")
+                logger.info("Opened interface %d: %s", i, dev.deck_type())
                 break
             except Exception as e:
-                print(f"  Interface {i} failed: {e}")
+                logger.warning("Interface %d failed: %s", i, e)
         else:
+            logger.error("Could not open any Stream Deck interface")
             print("ERROR: Could not open any Stream Deck interface.")
             print("If this is a permissions issue, try: sudo python main.py")
             sys.exit(1)
@@ -1733,14 +1736,15 @@ end tell
         self.deck.set_brightness(self.config["brightness"])
 
         key_count = self.deck.key_count()
-        print(f"Connected: {self.deck.deck_type()} ({key_count} keys)")
+        logger.info("Connected: %s (%d keys)", self.deck.deck_type(), key_count)
 
         if key_count != TOTAL_KEYS:
+            logger.warning("Expected %d keys but deck has %d — layout may not work correctly", TOTAL_KEYS, key_count)
             print(f"Warning: this script expects {TOTAL_KEYS} keys but your deck has {key_count}.")
             print("The key layout may not work correctly.")
 
         # Tile windows into grid
-        print("Tiling terminal windows...")
+        logger.info("Tiling terminal windows...")
         self.tile_windows()
         time.sleep(0.3)
 
@@ -1766,7 +1770,7 @@ end tell
         self.deck.set_key_callback(self._on_key_change)
 
         # Start screen border overlay
-        print("Starting screen overlay...")
+        logger.info("Starting screen overlay...")
         self._start_overlay()
 
         # Start settings server
