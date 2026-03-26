@@ -1,9 +1,20 @@
-# ClawDeck
+# ClawDeck Mini
+
+> **Fork of [ClawDeck](https://github.com/coryszatkowski/ClawDeck)** by [coryszatkowski](https://github.com/coryszatkowski).
+> All credit for the original project goes to the original author.
+> This fork is not endorsed by or affiliated with the original project.
 
 Map an Elgato Stream Deck to a grid of terminal windows running Claude Code sessions. Each button shows the session's state — idle (blue), working (green), needs permission (red blink). Tap to switch windows, hold to dictate.
 
 Built for the **Stream Deck Original** (15-key, 5x3 grid) on **macOS**.
 Also supports the **Stream Deck Mini** (6-key, 3x2 grid).
+
+## What This Fork Adds
+
+This fork extends the original ClawDeck with two changes:
+
+- **Stream Deck Mini support** — auto-detects the connected device and loads the appropriate profile (grid dimensions, layouts, and nav mode mappings). The Original 15-key behavior is unchanged.
+- **Ghostty terminal support** — adds [Ghostty](https://ghostty.org) to the list of recognized terminal apps for window tiling and management.
 
 ## What It Does
 
@@ -119,34 +130,90 @@ Mini (3×2):
 
 ## Requirements
 
-- macOS (uses Quartz, AppKit, AppleScript for window management)
-- [Homebrew](https://brew.sh)
-- Elgato Stream Deck (Original 15-key or Mini 6-key)
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed
+- **macOS** (uses Quartz, AppKit, AppleScript for window management)
+- **[Homebrew](https://brew.sh)**
+- **Python 3.12 or 3.13** (installed automatically by the setup script via Homebrew)
+- **Elgato Stream Deck** — Original (15-key) or Mini (6-key)
+- **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** installed and working
+
+> **Important:** ClawDeck talks directly to the Stream Deck hardware over USB. You must **quit the Elgato Stream Deck software** before running ClawDeck. The two cannot run at the same time. Your Elgato profiles are not affected — just relaunch the Elgato app when you're done with ClawDeck.
 
 ## Install
 
 ```bash
-git clone https://github.com/coryszatkowski/ClawDeck.git
-cd ClawDeck
+git clone https://github.com/boeightai/ClawDeckMini.git
+cd ClawDeckMini
 bash setup.sh
 ```
 
-Setup will:
+The setup script will:
 1. Install `hidapi` and Python 3.13 via Homebrew
-2. Create a virtual environment and install dependencies
-3. Offer to install Claude Code hooks into `~/.claude/settings.json`
+2. Create a virtual environment (`.venv/`) and install Python dependencies
+3. Prompt to install Claude Code hooks into `~/.claude/settings.json` — type `y` to accept
 
-On first run, you'll be prompted to grant **Accessibility** permissions to your terminal app (required for window management). If you use multiple terminal apps (e.g. Terminal.app for the controller and iTerm2 for Claude sessions), grant Accessibility to **all of them** in System Settings > Privacy & Security > Accessibility.
+### Permissions
+
+On first run, you'll be prompted to grant **Accessibility** permissions to your terminal app. This is required for window management and keystroke sending.
+
+If you use multiple terminal apps (e.g. Terminal.app for the controller and Ghostty for Claude sessions), grant Accessibility to **all of them**:
+
+> System Settings → Privacy & Security → Accessibility → add your terminal app(s)
 
 ## Run
 
+1. **Quit the Elgato Stream Deck software** (menu bar → quit)
+2. Start ClawDeck:
+
 ```bash
-cd ClawDeck
-.venv/bin/python main.py
+cd ClawDeckMini
+sudo .venv/bin/python main.py
 ```
 
+> `sudo` is required for USB HID access to the Stream Deck hardware.
+
+3. ClawDeck will auto-detect your device and print:
+```
+Connected: Stream Deck Mini (6 keys) — profile: Stream Deck Mini
+```
+4. Type `tile` to arrange your open terminal windows into the grid.
+5. Open more terminal windows and run `claude` in each one to start Claude Code sessions.
+
 This starts the controller with a terminal REPL and a browser-based settings UI.
+
+### Quick Launch
+
+To avoid typing the full path each time, add a shell alias:
+
+```bash
+echo "alias clawdeck='cd ~/Documents/ClawDeckMini && sudo .venv/bin/python menubar.py'" >> ~/.zshrc
+```
+
+Then open a new terminal and type `clawdeck` to launch.
+
+## Configuration
+
+ClawDeck works out of the box with no configuration file. All settings have sensible defaults.
+
+Settings are saved to `config.json` (gitignored) when you change them via the Settings UI or REPL commands. See [`config.example.json`](config.example.json) for all available options and their defaults.
+
+To start with a custom config, copy the example:
+
+```bash
+cp config.example.json config.json
+```
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `brightness` | `80` | Stream Deck LED brightness (0-100) |
+| `hold_threshold` | `0.5` | Seconds before a hold triggers MIC |
+| `poll_interval` | `0.2` | Seconds between active-window checks |
+| `snap_enabled` | `true` | Auto-snap dragged windows to grid |
+| `mic_command` | `"fn"` | MIC action — `"fn"` for Whisprflow, or a shell command |
+| `idle_timeout` | `3600` | Seconds before idle/working status resets to black |
+| `layout` | `"default"` | Active layout name (available layouts depend on device) |
+| `colors` | *(see example)* | Hex colors for status states, nav keys, and active window |
+
+> **Note:** Device detection (Mini vs Original) is automatic based on the connected hardware — it is not a config setting.
 
 ## Settings UI
 
@@ -180,18 +247,13 @@ Settings persist to `config.json` automatically.
 
 ## Menu Bar App (Optional)
 
-For a standalone menu bar experience:
+For a menu bar experience instead of the terminal REPL:
 
 ```bash
-.venv/bin/python menubar.py
+sudo .venv/bin/python menubar.py
 ```
 
-Or build a `.app` bundle:
-
-```bash
-.venv/bin/python setup.py py2app
-open dist/ClawDeck.app
-```
+A crab icon appears in the menu bar. Click it to Start/Stop the controller, Tile Windows, or open Settings. This also requires `sudo` for USB HID access.
 
 ## How It Works
 
@@ -213,7 +275,16 @@ Claude Code hooks fire on state changes (tool use, permission prompts, idle) and
 
 ## Terminal Apps Supported
 
-Terminal.app and iTerm2 have full TTY mapping (status colors per window). Other apps (Warp, Alacritty, kitty, Hyper) will tile and activate but won't show per-session status colors.
+Terminal.app, iTerm2, and Ghostty have full TTY mapping (status colors per window). Other apps (Warp, Alacritty, kitty, Hyper) will tile and activate but won't show per-session status colors.
+
+> **Ghostty users:** Make sure to grant Accessibility permissions to Ghostty in System Settings → Privacy & Security → Accessibility. Without this, ClawDeck cannot manage Ghostty windows.
+
+## Stream Deck Mini Notes
+
+- The Mini has **5 terminal slots** plus an Enter key (vs 14 on the Original).
+- **Nav Mode** is simplified: Up/Down arrows + numbers 1-2 + Back + Enter. There is no dedicated MIC button — use hold-to-activate on any terminal button in Grid Mode instead.
+- The screen tiles into a **3-column, 2-row grid**. The bottom-right cell is used by the controller's own terminal when running `main.py`.
+- ClawDeck tiles to **whichever monitor your mouse cursor is on** at startup. Move your mouse to the desired monitor before starting.
 
 ## License
 
