@@ -1504,6 +1504,7 @@ end tell
 
     def _poll_active_loop(self):
         """Background thread: sync active_slot and Claude status with the grid."""
+        consecutive_errors = 0
         while self.running:
             try:
                 if self.mode == MODE_GRID:
@@ -1543,8 +1544,14 @@ end tell
 
                     if needs_redraw:
                         self._update_all_buttons()
+
+                consecutive_errors = 0
             except Exception:
-                pass  # Don't crash the poller
+                consecutive_errors += 1
+                if consecutive_errors >= 10:
+                    logger.error("Poll loop: %d consecutive errors", consecutive_errors, exc_info=True)
+                else:
+                    logger.warning("Poll loop error (consecutive: %d)", consecutive_errors, exc_info=True)
             time.sleep(self.config["poll_interval"])
 
     # ─── REPL Commands ────────────────────────────────────────────────
