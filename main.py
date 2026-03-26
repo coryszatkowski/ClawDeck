@@ -170,7 +170,58 @@ LAYOUTS = {
     ],
 }
 
-LAYOUT_NAMES = list(LAYOUTS.keys())
+LAYOUT_NAMES = list(LAYOUTS.keys()) + ["auto"]
+
+# AUTO_LAYOUTS — dynamically selected based on how many terminal windows are open.
+# Each layout maximizes window size for the given count within the 5×3 grid.
+# ═══════════════════════════════════════════════════════════════════════
+AUTO_LAYOUTS = {
+    1: [
+        "T1",  "T1",  "T1",  "T1",  "T1",
+        "T1",  "T1",  "T1",  "T1",  "T1",
+        "T1",  "T1",  "T1",  "T1",  "ENTER",
+    ],
+    2: [
+        "T1",  "T1",  "T1",  "T2",  "T2",
+        "T1",  "T1",  "T1",  "T2",  "T2",
+        "T1",  "T1",  "T1",  "T2",  "ENTER",
+    ],
+    3: [
+        "T1",  "T1",  "T1",  "T2",  "T2",
+        "T1",  "T1",  "T1",  "T2",  "T2",
+        "T3",  "T3",  "T3",  "T3",  "ENTER",
+    ],
+    4: [
+        "T1",  "T1",  "T2",  "T2",  "T2",
+        "T1",  "T1",  "T2",  "T2",  "T2",
+        "T3",  "T3",  "T4",  "T4",  "ENTER",
+    ],
+    5: [
+        "T1",  "T1",  "T2",  "T2",  "T3",
+        "T1",  "T1",  "T2",  "T2",  "T3",
+        "T4",  "T4",  "T5",  "T5",  "ENTER",
+    ],
+    6: [
+        "T1",  "T1",  "T2",  "T2",  "T3",
+        "T1",  "T1",  "T2",  "T2",  "T3",
+        "T4",  "T4",  "T5",  "T6",  "ENTER",
+    ],
+    7: [
+        "T1",  "T1",  "T2",  "T2",  "T3",
+        "T4",  "T4",  "T5",  "T5",  "T3",
+        "T6",  "T6",  "T7",  "T7",  "ENTER",
+    ],
+    8: [
+        "T1",  "T1",  "T2",  "T2",  "T3",
+        "T4",  "T4",  "T5",  "T5",  "T6",
+        "T7",  "T7",  "T8",  "T8",  "ENTER",
+    ],
+    9: [
+        "T1",  "T2",  "T3",  "T4",  "T5",
+        "T6",  "T7",  "T8",  "T9",  "T5",
+        "T6",  "T7",  "T8",  "T9",  "ENTER",
+    ],
+}
 
 # Nav mode layout: key_index -> (action_type, value)
 NAV_KEYMAP = {
@@ -302,6 +353,8 @@ class DeckController:
         # Snap-to-grid: track window positions to detect drag-and-drop
         self._prev_win_positions = {}   # window_id -> (x, y, w, h)
         self._snap_candidates = {}     # window_id -> {pos, polls_stable, win}
+        self._auto_window_count = 0    # cached window count for auto layout
+        self._auto_layout_cache = None # cached auto layout (list of 15 names)
 
     # ─── Config ───────────────────────────────────────────────────────
 
@@ -350,7 +403,30 @@ class DeckController:
     def _get_layout(self):
         """Get the current layout mapping (list of 15 terminal names)."""
         name = self.config.get("layout", "default")
+        if name == "auto":
+            if self._auto_layout_cache is not None:
+                return self._auto_layout_cache
+            # Fallback: count windows now (expensive, but only on first call)
+            self._refresh_auto_layout()
+            return self._auto_layout_cache or LAYOUTS["default"]
         return LAYOUTS.get(name, LAYOUTS["default"])
+
+    def _refresh_auto_layout(self):
+        """Recount terminal windows and update the auto layout if the count changed.
+        Returns True if the layout changed."""
+        term_wins = self._get_terminal_windows()
+        controller_win = self._find_controller_window(term_wins)
+        # Count windows excluding the controller
+        count = len(term_wins) - (1 if controller_win else 0)
+        count = max(1, min(count, 14))
+        if count == self._auto_window_count and self._auto_layout_cache is not None:
+            return False
+        self._auto_window_count = count
+        if count >= 10:
+            self._auto_layout_cache = LAYOUTS["default"]
+        else:
+            self._auto_layout_cache = AUTO_LAYOUTS[count]
+        return True
 
     def _get_terminal_names(self):
         """Get unique terminal names in the current layout (excluding ENTER), in order."""
@@ -861,6 +937,16 @@ return output
 
         # Find the controller's own terminal window by TTY
         controller_win = self._find_controller_window(term_wins)
+
+        # Auto layout: pick the best layout for the current window count
+        if self.config.get("layout") == "auto":
+            count = len(term_wins) - (1 if controller_win else 0)
+            count = max(1, min(count, 14))
+            self._auto_window_count = count
+            if count >= 10:
+                self._auto_layout_cache = LAYOUTS["default"]
+            else:
+                self._auto_layout_cache = AUTO_LAYOUTS[count]
         other_wins = []
         for win in term_wins:
             if controller_win and win["id"] == controller_win["id"]:
@@ -1485,6 +1571,15 @@ end tell
                         self._build_tty_map()
                         self._last_tty_refresh = now_tty
 
+                        # Auto layout: recount windows and retile if count changed
+                        if self.config.get("layout") == "auto":
+                            if self._refresh_auto_layout():
+                                self.tile_windows()
+                                time.sleep(0.3)
+                                self._build_tty_map()
+                                self._update_overlay()
+                                needs_redraw = True
+
                     # Snap-to-grid: detect dragged windows and snap them
                     if self.config["snap_enabled"] and self._check_snap_to_grid():
                         needs_redraw = True
@@ -1629,7 +1724,7 @@ end tell
                 print(f"  available: {', '.join(LAYOUT_NAMES)}")
                 return
             name = arg.lower().strip()
-            if name not in LAYOUTS:
+            if name not in LAYOUTS and name != "auto":
                 print(f"  Unknown layout: {name}")
                 print(f"  available: {', '.join(LAYOUT_NAMES)}")
                 return
