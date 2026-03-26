@@ -301,8 +301,9 @@
 <div class="section">
   <h2>Layout</h2>
   <input type="hidden" id="layout" value="default">
-  <div class="layout-grid">
-    <div class="layout-card" data-layout="default" onclick="selectLayout('default')">
+  <div class="layout-grid" id="layoutGrid">
+    <!-- Stream Deck Original (5x3) layouts -->
+    <div class="layout-card" data-layout="default" data-device="original" onclick="selectLayout('default')">
       <div class="layout-label">Default</div>
       <svg viewBox="0 0 50 30" class="layout-svg">
         <rect x="1" y="1" width="9" height="9" rx="1"/>
@@ -323,7 +324,7 @@
       </svg>
       <div class="layout-count">14 terminals</div>
     </div>
-    <div class="layout-card" data-layout="quad" onclick="selectLayout('quad')">
+    <div class="layout-card" data-layout="quad" data-device="original" onclick="selectLayout('quad')">
       <div class="layout-label">Quad</div>
       <svg viewBox="0 0 50 30" class="layout-svg">
         <rect x="1" y="1" width="19" height="19" rx="1" class="big-zone"/>
@@ -341,7 +342,7 @@
       </svg>
       <div class="layout-count">11 terminals</div>
     </div>
-    <div class="layout-card" data-layout="double_quad" onclick="selectLayout('double_quad')">
+    <div class="layout-card" data-layout="double_quad" data-device="original" onclick="selectLayout('double_quad')">
       <div class="layout-label">Double Quad</div>
       <svg viewBox="0 0 50 30" class="layout-svg">
         <rect x="1" y="1" width="19" height="19" rx="1" class="big-zone"/>
@@ -356,7 +357,7 @@
       </svg>
       <div class="layout-count">8 terminals</div>
     </div>
-    <div class="layout-card" data-layout="wide" onclick="selectLayout('wide')">
+    <div class="layout-card" data-layout="wide" data-device="original" onclick="selectLayout('wide')">
       <div class="layout-label">Wide</div>
       <svg viewBox="0 0 50 30" class="layout-svg">
         <rect x="1" y="1" width="29" height="19" rx="1" class="big-zone"/>
@@ -372,7 +373,7 @@
       </svg>
       <div class="layout-count">9 terminals</div>
     </div>
-    <div class="layout-card" data-layout="half" onclick="selectLayout('half')">
+    <div class="layout-card" data-layout="half" data-device="original" onclick="selectLayout('half')">
       <div class="layout-label">Half</div>
       <svg viewBox="0 0 50 30" class="layout-svg">
         <rect x="1" y="1" width="19" height="28" rx="1" class="big-zone"/>
@@ -387,6 +388,49 @@
         <rect x="41" y="21" width="8" height="8" rx="1" class="enter-key"/>
       </svg>
       <div class="layout-count">6 terminals</div>
+    </div>
+
+    <!-- Stream Deck Mini (3x2) layouts -->
+    <div class="layout-card" data-layout="default" data-device="mini" onclick="selectLayout('default')" style="display:none">
+      <div class="layout-label">Default</div>
+      <svg viewBox="0 0 30 20" class="layout-svg">
+        <rect x="1" y="1" width="9" height="9" rx="1"/>
+        <rect x="11" y="1" width="9" height="9" rx="1"/>
+        <rect x="21" y="1" width="8" height="9" rx="1"/>
+        <rect x="1" y="11" width="9" height="8" rx="1"/>
+        <rect x="11" y="11" width="9" height="8" rx="1"/>
+        <rect x="21" y="11" width="8" height="8" rx="1" class="enter-key"/>
+      </svg>
+      <div class="layout-count">5 terminals</div>
+    </div>
+    <div class="layout-card" data-layout="focus" data-device="mini" onclick="selectLayout('focus')" style="display:none">
+      <div class="layout-label">Focus</div>
+      <svg viewBox="0 0 30 20" class="layout-svg">
+        <rect x="1" y="1" width="28" height="9" rx="1" class="big-zone"/>
+        <rect x="1" y="11" width="9" height="8" rx="1"/>
+        <rect x="11" y="11" width="9" height="8" rx="1"/>
+        <rect x="21" y="11" width="8" height="8" rx="1" class="enter-key"/>
+      </svg>
+      <div class="layout-count">3 terminals</div>
+    </div>
+    <div class="layout-card" data-layout="dual" data-device="mini" onclick="selectLayout('dual')" style="display:none">
+      <div class="layout-label">Dual</div>
+      <svg viewBox="0 0 30 20" class="layout-svg">
+        <rect x="1" y="1" width="9" height="18" rx="1" class="big-zone"/>
+        <rect x="11" y="1" width="9" height="18" rx="1" class="big-zone"/>
+        <rect x="21" y="1" width="8" height="9" rx="1"/>
+        <rect x="21" y="11" width="8" height="8" rx="1" class="enter-key"/>
+      </svg>
+      <div class="layout-count">3 terminals</div>
+    </div>
+    <div class="layout-card" data-layout="wide" data-device="mini" onclick="selectLayout('wide')" style="display:none">
+      <div class="layout-label">Wide</div>
+      <svg viewBox="0 0 30 20" class="layout-svg">
+        <rect x="1" y="1" width="19" height="18" rx="1" class="big-zone"/>
+        <rect x="21" y="1" width="8" height="9" rx="1"/>
+        <rect x="21" y="11" width="8" height="8" rx="1" class="enter-key"/>
+      </svg>
+      <div class="layout-count">2 terminals</div>
     </div>
   </div>
 </div>
@@ -554,6 +598,16 @@
       const s = await res.json();
       document.getElementById('brightness').value = s.brightness || 80;
       document.getElementById('brightnessVal').textContent = s.brightness || 80;
+      // Show/hide layout cards based on connected device
+      const device = s._device || {};
+      const deviceType = (device.cols === 3 && device.rows === 2) ? 'mini' : 'original';
+      document.querySelectorAll('.layout-card').forEach(card => {
+        card.style.display = card.dataset.device === deviceType ? '' : 'none';
+      });
+      const grid = document.getElementById('layoutGrid');
+      const visibleCards = document.querySelectorAll('.layout-card[data-device="' + deviceType + '"]').length;
+      grid.style.gridTemplateColumns = 'repeat(' + visibleCards + ', 1fr)';
+
       selectLayout(s.layout || 'default', false);
       document.getElementById('hold_threshold').value = s.hold_threshold || 0.5;
       document.getElementById('poll_interval').value = s.poll_interval || 0.2;
