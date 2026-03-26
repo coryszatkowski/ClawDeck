@@ -349,8 +349,8 @@ class DeckController:
                 config["colors"].update(saved["colors"])
                 del saved["colors"]
             config.update(saved)
-        except (FileNotFoundError, json.JSONDecodeError):
-            pass
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            logger.debug("Config load skipped: %s", e)
         return config
 
     def _save_config(self):
@@ -371,8 +371,8 @@ class DeckController:
         if h:
             try:
                 return _hex_to_rgb(h)
-            except (ValueError, IndexError):
-                pass
+            except (ValueError, IndexError) as e:
+                logger.debug("Invalid color hex for '%s': %s", key, e)
         return fallback
 
     # ─── Layout ──────────────────────────────────────────────────────
@@ -582,6 +582,7 @@ class DeckController:
                 try:
                     return ImageFont.truetype(path, size)
                 except (IOError, OSError):
+                    logger.debug("Font not found: %s", path)
                     continue
             return ImageFont.load_default()
 
@@ -694,7 +695,8 @@ return output
                             "w": right - left, "h": bottom - top,
                             "tty": tty,
                         })
-                    except ValueError:
+                    except ValueError as e:
+                        logger.debug("Skipping malformed window line: %s", e)
                         continue
             return windows
         except Exception:
@@ -747,7 +749,8 @@ return output
                 slot = tty_to_slot.get(tty)
                 if slot is not None:
                     new_status[slot] = state
-            except (json.JSONDecodeError, IOError):
+            except (json.JSONDecodeError, IOError) as e:
+                logger.debug("Skipping status file: %s", e)
                 continue
 
         self.slot_status = new_status
@@ -776,6 +779,7 @@ return output
                 log_file = open(log_path, "w")
                 self._overlay_log = log_file  # keep ref so fd stays open
             except PermissionError:
+                logger.debug("Overlay log file permission denied, discarding output")
                 # Stale root-owned log from previous sudo run — discard output
                 log_file = open(os.devnull, "w")
             self.overlay_proc = subprocess.Popen(
@@ -850,15 +854,15 @@ return output
         try:
             tty_path = os.ttyname(sys.stdin.fileno())
             return tty_path.replace("/dev/", "")
-        except (OSError, AttributeError):
-            pass
+        except (OSError, AttributeError) as e:
+            logger.debug("TTY detection via stdin failed: %s", e)
         # Fallback: tty command
         try:
             result = subprocess.run(["tty"], capture_output=True, text=True, timeout=2)
             if result.returncode == 0 and result.stdout.strip() != "not a tty":
                 return result.stdout.strip().replace("/dev/", "")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("TTY detection via tty command failed: %s", e)
         return None
 
     def _find_controller_window(self, term_wins):
@@ -1890,6 +1894,7 @@ end tell
                 self._settings_port = port
                 return port
             except OSError:
+                logger.debug("Port %d in use, trying next", port)
                 continue
         return None
 
