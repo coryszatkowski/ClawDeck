@@ -1761,6 +1761,7 @@ end tell
             try:
                 f.unlink()
             except PermissionError:
+                logger.debug("Could not unlink %s, falling back to rm", f)
                 subprocess.run(["rm", "-f", str(f)], capture_output=True)
 
         # Initial render
