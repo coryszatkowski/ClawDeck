@@ -700,6 +700,7 @@ return output
                         continue
             return windows
         except Exception:
+            logger.warning("Failed to get terminal windows", exc_info=True)
             return []
 
     def _read_status_files(self):
@@ -763,7 +764,7 @@ return output
         try:
             Path(OVERLAY_FILE).unlink(missing_ok=True)
         except Exception:
-            pass
+            logger.warning("Failed to clean stale overlay file", exc_info=True)
 
         script_dir = os.path.dirname(os.path.abspath(__file__))
         overlay_script = os.path.join(script_dir, "overlay.py")
@@ -787,8 +788,8 @@ return output
                 stdout=log_file, stderr=log_file,
                 start_new_session=True,
             )
-        except Exception as e:
-            print(f"[overlay] Failed to start overlay: {e}")
+        except Exception:
+            logger.error("Failed to start overlay", exc_info=True)
             self.overlay_proc = None
 
     def _stop_overlay(self):
@@ -798,16 +799,17 @@ return output
                 self.overlay_proc.terminate()
                 self.overlay_proc.wait(timeout=3)
             except Exception:
+                logger.warning("Overlay terminate failed, attempting kill", exc_info=True)
                 try:
                     self.overlay_proc.kill()
                 except Exception:
-                    pass
+                    logger.warning("Overlay kill also failed", exc_info=True)
             self.overlay_proc = None
         # Remove overlay file
         try:
             Path(OVERLAY_FILE).unlink(missing_ok=True)
         except Exception:
-            pass
+            logger.warning("Failed to remove overlay file", exc_info=True)
 
     def _update_overlay(self):
         """Write active window position to the overlay file (atomic)."""
@@ -828,7 +830,7 @@ return output
             tmp.write_text(json.dumps(data))
             tmp.rename(overlay_path)
         except Exception:
-            pass
+            logger.warning("Failed to write overlay file", exc_info=True)
 
     # ─── Grid Geometry ───────────────────────────────────────────────
 
@@ -1223,8 +1225,8 @@ end tell
             try:
                 subprocess.Popen(mic_cmd, shell=True,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except Exception as e:
-                print(f"[mic] Command failed: {e}")
+            except Exception:
+                logger.warning("MIC command failed", exc_info=True)
 
     def _learn_keystroke(self):
         """Listen for a single keystroke and save it as the MIC action.
@@ -1852,6 +1854,7 @@ end tell
                             f.write("\n")
                         os.rename(tmp, CONFIG_FILE)
                     except Exception as e:
+                        logger.error("Settings API: config save failed", exc_info=True)
                         self._json_response({"ok": False, "error": str(e)}, 500)
                         return
                     old_layout = controller_ref.config.get("layout")
@@ -1860,7 +1863,7 @@ end tell
                         try:
                             controller_ref.deck.set_brightness(new_config.get("brightness", 80))
                         except Exception:
-                            pass
+                            logger.warning("Failed to set brightness via settings API", exc_info=True)
                         # Re-tile if layout changed
                         if new_config.get("layout") != old_layout:
                             controller_ref.tile_windows()
