@@ -75,7 +75,7 @@ import CoreFoundation
 # ═══════════════════════════════════════════════════════════════════════
 
 # All terminal apps to include in the grid (windows from any of these get tiled)
-TERMINAL_APPS = {"Terminal", "iTerm2", "iTerm", "Warp", "Alacritty", "kitty", "Hyper"}
+TERMINAL_APPS = {"Terminal", "iTerm2", "iTerm", "Warp", "Alacritty", "kitty", "Hyper", "Ghostty"}
 COLS = 5
 ROWS = 3
 HOLD_THRESHOLD_SEC = 0.5        # hold longer than this → trigger Whisprflow
