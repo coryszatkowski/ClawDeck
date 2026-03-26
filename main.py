@@ -2,33 +2,33 @@
 """
 ClawDeck — Stream Deck controller for Claude Code terminal sessions
 
-Maps a 5x3 (15-key) Elgato Stream Deck to terminal windows arranged in a grid.
+Maps an Elgato Stream Deck to terminal windows arranged in a grid.
+Auto-detects device model and loads the appropriate profile.
 
-GRID MODE (default):
-  ┌─────┬─────┬─────┬─────┬─────┐
-  │ T1  │ T2  │ T3  │ T4  │ T5  │
-  ├─────┼─────┼─────┼─────┼─────┤
-  │ T6  │ T7  │ T8  │ T9  │ T10 │
-  ├─────┼─────┼─────┼─────┼─────┤
-  │ T11 │ T12 │ T13 │ T14 │  ⏎  │
-  └─────┴─────┴─────┴─────┴─────┘
+STREAM DECK ORIGINAL (5x3, 15 keys):
+
+  Grid Mode:                          Nav Mode:
+  ┌─────┬─────┬─────┬─────┬─────┐    ┌─────┬─────┬─────┬─────┬─────┐
+  │ T1  │ T2  │ T3  │ T4  │ T5  │    │  1  │  2  │  3  │  4  │  5  │
+  ├─────┼─────┼─────┼─────┼─────┤    ├─────┼─────┼─────┼─────┼─────┤
+  │ T6  │ T7  │ T8  │ T9  │ T10 │    │     │     │  ↑  │     │BACK │
+  ├─────┼─────┼─────┼─────┼─────┤    ├─────┼─────┼─────┼─────┼─────┤
+  │ T11 │ T12 │ T13 │ T14 │  ⏎  │    │ MIC │  ←  │  ↓  │  →  │  ⏎  │
+  └─────┴─────┴─────┴─────┴─────┘    └─────┴─────┴─────┴─────┴─────┘
+
+STREAM DECK MINI (3x2, 6 keys):
+
+  Grid Mode:              Nav Mode:
+  ┌─────┬─────┬─────┐    ┌─────┬─────┬─────┐
+  │ T1  │ T2  │ T3  │    │  ↑  │  ↓  │BACK │
+  ├─────┼─────┼─────┤    ├─────┼─────┼─────┤
+  │ T4  │ T5  │  ⏎  │    │  1  │  2  │  ⏎  │
+  └─────┴─────┴─────┘    └─────┴─────┴─────┘
+
   - Tap a terminal button → activate that window (turns amber)
   - Tap the already-active button → enter Nav Mode
   - Hold any terminal button (>=0.5s) → activate + trigger Whisprflow (fn)
   - Bottom-right key always sends Enter to active window
-
-NAV MODE (tap the active terminal):
-  ┌─────┬─────┬─────┬─────┬─────┐
-  │  1  │  2  │  3  │  4  │  5  │  ← ROYGB number keys
-  ├─────┼─────┼─────┼─────┼─────┤
-  │     │     │  ↑  │     │BACK │
-  ├─────┼─────┼─────┼─────┼─────┤
-  │ MIC │  ←  │  ↓  │  →  │  ⏎  │
-  └─────┴─────┴─────┴─────┴─────┘
-  - 1-5 keys send number keystrokes (for Claude Code multi-choice)
-  - Arrow cluster for navigation (slate-blue zone)
-  - MIC triggers Whisprflow (fn double-press)
-  - Enter sends Return (stays in Nav Mode for multi-question flows)
   - BACK returns to Grid Mode
 
 Active terminal is amber; all others are black.
@@ -75,7 +75,7 @@ import CoreFoundation
 # ═══════════════════════════════════════════════════════════════════════
 
 # All terminal apps to include in the grid (windows from any of these get tiled)
-TERMINAL_APPS = {"Terminal", "iTerm2", "iTerm", "Warp", "Alacritty", "kitty", "Hyper"}
+TERMINAL_APPS = {"Terminal", "iTerm2", "iTerm", "Warp", "Alacritty", "kitty", "Hyper", "Ghostty"}
 COLS = 5
 ROWS = 3
 HOLD_THRESHOLD_SEC = 0.5        # hold longer than this → trigger Whisprflow
@@ -135,7 +135,7 @@ MODE_NAV = "nav"
 # ═══════════════════════════════════════════════════════════════════════
 # LAYOUTS — each maps key index to a terminal name
 # Multiple keys with the same name merge into one window.
-# Key 14 is always ENTER.
+# Last key is always ENTER.
 # ═══════════════════════════════════════════════════════════════════════
 
 LAYOUTS = {
@@ -203,6 +203,66 @@ NAV_BUTTON_STYLES = {
     13: {"label": "→",    "bg": COLOR_BG_NAV_ARROW,  "fg": COLOR_FG_NAV_ARROW},
     14: {"label": "⏎",    "bg": COLOR_BG_NAV_ACTION, "fg": COLOR_FG_NAV_ACTION},
 }
+
+# ═══════════════════════════════════════════════════════════════════════
+# DEVICE PROFILES — per-device grid, layouts, and nav mappings
+# Auto-detected at startup by key_count(). 15-key (Original) is default.
+# ═══════════════════════════════════════════════════════════════════════
+
+DEVICE_PROFILES = {
+    15: {
+        "name": "Stream Deck Original",
+        "cols": 5, "rows": 3,
+        "layouts": LAYOUTS,
+        "nav_keymap": NAV_KEYMAP,
+        "nav_button_styles": NAV_BUTTON_STYLES,
+    },
+    6: {
+        "name": "Stream Deck Mini",
+        "cols": 3, "rows": 2,
+        "layouts": {
+            "default": ["T1", "T2", "T3", "T4", "T5", "ENTER"],
+            "focus":   ["T1", "T1", "T1", "T2", "T3", "ENTER"],
+            "dual":    ["T1", "T2", "T3", "T1", "T2", "ENTER"],
+            "wide":    ["T1", "T1", "T2", "T1", "T1", "ENTER"],
+        },
+        "nav_keymap": {
+            0: ("arrow", "Up"),   1: ("arrow", "Down"), 2: ("back", None),
+            3: ("num",   "1"),    4: ("num",   "2"),    5: ("enter", None),
+        },
+        "nav_button_styles": {
+            0: {"label": "↑",    "bg": COLOR_BG_NAV_ARROW,  "fg": COLOR_FG_NAV_ARROW},
+            1: {"label": "↓",    "bg": COLOR_BG_NAV_ARROW,  "fg": COLOR_FG_NAV_ARROW},
+            2: {"label": "BACK", "bg": COLOR_BG_NAV_BACK,   "fg": COLOR_FG_DEFAULT},
+            3: {"label": "1",    "bg": COLOR_BG_NUM_1,      "fg": COLOR_FG_NAV_NUM},
+            4: {"label": "2",    "bg": COLOR_BG_NUM_2,      "fg": COLOR_FG_NAV_NUM},
+            5: {"label": "⏎",    "bg": COLOR_BG_NAV_ACTION, "fg": COLOR_FG_NAV_ACTION},
+        },
+    },
+}
+
+
+def apply_device_profile(key_count):
+    """Apply device-specific configuration. Must be called before threads start."""
+    global COLS, ROWS, TOTAL_KEYS, GRID_SLOTS, DECK_TERMINAL_SLOTS, ENTER_KEY_INDEX
+    global LAYOUTS, LAYOUT_NAMES, NAV_KEYMAP, NAV_BUTTON_STYLES
+    profile = DEVICE_PROFILES.get(key_count, DEVICE_PROFILES[15])
+    COLS = profile["cols"]
+    ROWS = profile["rows"]
+    TOTAL_KEYS = COLS * ROWS
+    GRID_SLOTS = TOTAL_KEYS
+    DECK_TERMINAL_SLOTS = TOTAL_KEYS - 1
+    ENTER_KEY_INDEX = TOTAL_KEYS - 1
+    LAYOUTS = profile["layouts"]
+    LAYOUT_NAMES = list(LAYOUTS.keys())
+    NAV_KEYMAP = profile["nav_keymap"]
+    NAV_BUTTON_STYLES = profile["nav_button_styles"]
+    # Validate all layouts have the correct number of entries
+    for name, layout in LAYOUTS.items():
+        assert len(layout) == TOTAL_KEYS, (
+            f"Layout '{name}' has {len(layout)} entries, expected {TOTAL_KEYS}"
+        )
+
 
 # macOS key codes for arrow keys
 ARROW_KEY_CODES = {"Up": 126, "Down": 125, "Left": 123, "Right": 124}
@@ -287,7 +347,7 @@ class DeckController:
     def __init__(self):
         self.config = self._load_config()
         self.mode = MODE_GRID
-        self.active_slot = None       # which grid slot (0-13) is focused
+        self.active_slot = None       # which grid slot is focused
         self._key_press_time = {}     # key_index -> press timestamp (for hold detection)
         self.deck = None
         self.running = False
@@ -348,9 +408,11 @@ class DeckController:
     # ─── Layout ──────────────────────────────────────────────────────
 
     def _get_layout(self):
-        """Get the current layout mapping (list of 15 terminal names)."""
+        """Get the current layout mapping (list of terminal names, length = TOTAL_KEYS)."""
         name = self.config.get("layout", "default")
-        return LAYOUTS.get(name, LAYOUTS["default"])
+        if name not in LAYOUTS:
+            name = "default"
+        return LAYOUTS[name]
 
     def _get_terminal_names(self):
         """Get unique terminal names in the current layout (excluding ENTER), in order."""
@@ -852,7 +914,7 @@ return output
 
     def tile_windows(self):
         """Arrange terminal windows according to the current layout.
-        The controller's own terminal is always placed in slot 14 (bottom-right).
+        The controller's own terminal is always placed in the last slot (bottom-right).
         Remaining windows are matched to layout terminals by proximity."""
         term_wins = self._get_terminal_windows()
         if not term_wins:
@@ -867,9 +929,9 @@ return output
                 continue
             other_wins.append(win)
 
-        # Place controller window in slot 14 (bottom-right, always single cell)
+        # Place controller window in last slot (bottom-right, always single cell)
         if controller_win:
-            print(f"[tile] Controller terminal → slot 14")
+            print(f"[tile] Controller terminal → slot {ENTER_KEY_INDEX}")
             self._move_window_to_rect(controller_win, self._grid_rect(GRID_SLOTS - 1))
 
         # Get terminal zones from layout
@@ -1361,16 +1423,19 @@ end tell
         style = NAV_BUTTON_STYLES.get(key)
         if style is None:
             return None
-        # Override colors from config
+        # Override colors from config, deriving group from NAV_KEYMAP
         label = style["label"]
         bg = style["bg"]
         fg = style["fg"]
-        if key in (0, 1, 2, 3, 4):  # number keys
-            bg = self._color(f"num_{key+1}", bg)
-        elif key in (7, 11, 12, 13):  # arrows
-            bg = self._color("arrows", bg)
-        elif key in (10, 14):  # MIC, Enter
-            bg = self._color("mic_enter", bg)
+        action = NAV_KEYMAP.get(key)
+        if action:
+            action_type, action_val = action
+            if action_type == "num":
+                bg = self._color(f"num_{action_val}", bg)
+            elif action_type == "arrow":
+                bg = self._color("arrows", bg)
+            elif action_type in ("whisprflow", "enter"):
+                bg = self._color("mic_enter", bg)
         return {"label": label, "bg": bg, "fg": fg}
 
     def _draw_nav_mode(self):
@@ -1690,10 +1755,12 @@ end tell
         self.deck.set_brightness(self.config["brightness"])
 
         key_count = self.deck.key_count()
-        print(f"Connected: {self.deck.deck_type()} ({key_count} keys)")
-
-        if key_count != TOTAL_KEYS:
-            print(f"Warning: this script expects {TOTAL_KEYS} keys but your deck has {key_count}.")
+        apply_device_profile(key_count)
+        profile = DEVICE_PROFILES.get(key_count)
+        profile_name = profile["name"] if profile else "Unknown"
+        print(f"Connected: {self.deck.deck_type()} ({key_count} keys) — profile: {profile_name}")
+        if key_count not in DEVICE_PROFILES:
+            print(f"Warning: no profile for {key_count} keys, using Stream Deck Original default.")
             print("The key layout may not work correctly.")
 
         # Tile windows into grid
@@ -1781,7 +1848,13 @@ end tell
                     self.end_headers()
                     self.wfile.write(content)
                 elif path == "/api/settings":
-                    self._json_response(controller_ref.config)
+                    data = dict(controller_ref.config)
+                    data["_device"] = {
+                        "cols": COLS,
+                        "rows": ROWS,
+                        "layout_names": LAYOUT_NAMES,
+                    }
+                    self._json_response(data)
                 elif path == "/api/status":
                     if controller_ref.running and controller_ref.deck:
                         self._json_response({

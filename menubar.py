@@ -22,7 +22,7 @@ from urllib.parse import urlparse
 
 import rumps
 
-from main import DeckController, CONFIG_FILE, CONFIG_DEFAULTS
+from main import DeckController, CONFIG_FILE, CONFIG_DEFAULTS, apply_device_profile, DEVICE_PROFILES
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_HTML = os.path.join(SCRIPT_DIR, "settings.html")
@@ -212,6 +212,17 @@ class ClawDeckApp(rumps.App):
                 ctrl = self.controller
                 ctrl.deck.reset()
                 ctrl.deck.set_brightness(ctrl.config["brightness"])
+
+                # Apply device profile based on detected key count
+                key_count = ctrl.deck.key_count()
+                apply_device_profile(key_count)
+                profile = DEVICE_PROFILES.get(key_count)
+                profile_name = profile["name"] if profile else "Unknown"
+                print(f"Connected: {ctrl.deck.deck_type()} ({key_count} keys) — profile: {profile_name}")
+
+                # Re-detect screen bounds (use monitor where mouse is NOW)
+                ctrl.screen = ctrl._get_screen_bounds()
+
                 ctrl.tile_windows()
                 time.sleep(0.3)
 

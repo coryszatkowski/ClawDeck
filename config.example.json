@@ -1,0 +1,22 @@
+{
+  "brightness": 80,
+  "hold_threshold": 0.5,
+  "poll_interval": 0.2,
+  "snap_enabled": true,
+  "mic_command": "fn",
+  "idle_timeout": 3600,
+  "layout": "default",
+  "colors": {
+    "active": "#ffb000",
+    "idle": "#1e64dc",
+    "working": "#1ea046",
+    "permission": "#c83232",
+    "num_1": "#b42828",
+    "num_2": "#c87814",
+    "num_3": "#beaf14",
+    "num_4": "#28963c",
+    "num_5": "#2850c8",
+    "arrows": "#1e2337",
+    "mic_enter": "#e6e6e6"
+  }
+}
