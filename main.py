@@ -41,6 +41,36 @@ import sys
 import json
 import os
 from pathlib import Path
+import logging
+from logging.handlers import RotatingFileHandler
+
+def _setup_logging():
+    """Configure clawdeck logger with console and file handlers."""
+    log_dir = Path.home() / ".clawdeck"
+    log_dir.mkdir(exist_ok=True)
+
+    logger = logging.getLogger("clawdeck")
+    logger.setLevel(logging.DEBUG)
+
+    # Console: INFO and above
+    console = logging.StreamHandler()
+    console.setLevel(logging.INFO)
+    console.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+    logger.addHandler(console)
+
+    # File: DEBUG and above, rotating 1MB x 3 backups
+    file_handler = RotatingFileHandler(
+        log_dir / "clawdeck.log", maxBytes=1_000_000, backupCount=3
+    )
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+    ))
+    logger.addHandler(file_handler)
+
+    return logger
+
+logger = _setup_logging()
 
 from PIL import Image, ImageDraw, ImageFont
 from StreamDeck.DeviceManager import DeviceManager
