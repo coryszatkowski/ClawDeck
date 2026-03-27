@@ -1529,8 +1529,8 @@ end tell
 
                     # Check frontmost window
                     slot = self._get_frontmost_slot()
-                    if slot is not None and slot != self.active_slot:
-                        self.active_slot = slot
+                    if slot != self.active_slot:
+                        self.active_slot = slot  # None when non-terminal is frontmost
                         self._update_overlay()
                         needs_redraw = True
 
