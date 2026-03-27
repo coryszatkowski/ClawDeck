@@ -105,22 +105,27 @@ def create_label_window():
     win.setHasShadow_(False)
     win.setCollectionBehavior_(1 << 0)  # canJoinAllSpaces
 
-    # Create text field for the label
+    # Use CALayer for rounded corners on the amber background
+    view = win.contentView()
+    view.setWantsLayer_(True)
+    layer = view.layer()
+    r, g, b = AMBER
+    layer.setBackgroundColor_(CGColorCreateGenericRGB(r / 255.0, g / 255.0, b / 255.0, 1.0))
+    layer.setCornerRadius_(CORNER_RADIUS)
+    # Only round top corners by masking bottom
+    layer.setMaskedCorners_(1 << 0 | 1 << 1)  # kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner (AppKit bottom = visual top)
+
+    # Create text field — no background, vertically centered via frame offset
     label = NSTextField.alloc().initWithFrame_(((0, 0), (1, LABEL_HEIGHT)))
     label.setBezeled_(False)
-    label.setDrawsBackground_(True)
+    label.setDrawsBackground_(False)
     label.setEditable_(False)
     label.setSelectable_(False)
     label.setAlignment_(NSTextAlignmentCenter)
     label.setFont_(NSFont.boldSystemFontOfSize_(16.0))
     label.setTextColor_(NSColor.blackColor())
-    # Amber background matching border (fully opaque)
-    r, g, b = AMBER
-    label.setBackgroundColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(
-        r / 255.0, g / 255.0, b / 255.0, 1.0
-    ))
 
-    win.contentView().addSubview_(label)
+    view.addSubview_(label)
     return win, label
 
 
@@ -128,7 +133,10 @@ def show_label(win, label_field, primary_h, qx, qy, qw):
     """Position the label window at the top of the overlay rect."""
     ns_y = primary_h - qy - LABEL_HEIGHT
     win.setFrame_display_(((qx, ns_y), (qw, LABEL_HEIGHT)), True)
-    label_field.setFrame_(((0, 0), (qw, LABEL_HEIGHT)))
+    # Center text vertically — offset the text field down slightly
+    text_h = 20  # approximate height of 16pt bold text
+    y_offset = (LABEL_HEIGHT - text_h) / 2
+    label_field.setFrame_(((0, y_offset), (qw, text_h)))
     win.orderFront_(None)
 
 
