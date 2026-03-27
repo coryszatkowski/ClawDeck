@@ -639,13 +639,17 @@ class DeckController:
             cwd = self._resolve_tty_cwd(tty)
             if cwd:
                 cwd_map[slot] = cwd
+        logger.info("TTY map: %s", tty_map)
+        logger.info("CWD map: %s", {s: Path(c).name for s, c in cwd_map.items()})
         self.slot_cwd = cwd_map
 
     def _resolve_tty_cwd(self, tty_name):
-        """Get the working directory of the shell process on a TTY.
+        """Get the working directory of the most recent shell on a TTY.
+        Uses the last shell process (innermost/newest), which reflects
+        the current working directory even inside Claude Code sessions.
         Returns the path string, or None if it can't be resolved."""
         try:
-            # Find shell PID on this TTY
+            # Find all shell PIDs on this TTY (ps lists oldest first)
             result = subprocess.run(
                 ["ps", "-t", tty_name, "-o", "pid=,comm="],
                 capture_output=True, text=True, timeout=5,
@@ -659,8 +663,7 @@ class DeckController:
                 if len(parts) == 2:
                     comm = parts[1].strip().lstrip("-")
                     if comm in ("zsh", "bash", "fish"):
-                        shell_pid = parts[0].strip()
-                        break
+                        shell_pid = parts[0].strip()  # keep overwriting — last one wins
             if not shell_pid:
                 return None
 
@@ -677,7 +680,7 @@ class DeckController:
                     return line[1:]  # strip the 'n' prefix
             return None
         except Exception:
-            logger.debug("Failed to resolve CWD for %s", tty_name, exc_info=True)
+            logger.info("Failed to resolve CWD for %s", tty_name, exc_info=True)
             return None
 
     def _format_cwd(self, path):
