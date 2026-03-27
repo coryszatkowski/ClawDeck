@@ -121,15 +121,14 @@ def create_label_window():
     ))
 
     win.contentView().addSubview_(label)
-    win._label_field = label  # stash reference
-    return win
+    return win, label
 
 
-def show_label(win, primary_h, qx, qy, qw):
+def show_label(win, label_field, primary_h, qx, qy, qw):
     """Position the label window at the top of the overlay rect."""
     ns_y = primary_h - qy - LABEL_HEIGHT
     win.setFrame_display_(((qx, ns_y), (qw, LABEL_HEIGHT)), True)
-    win._label_field.setFrame_(((0, 0), (qw, LABEL_HEIGHT)))
+    label_field.setFrame_(((0, 0), (qw, LABEL_HEIGHT)))
     win.orderFront_(None)
 
 
@@ -153,7 +152,7 @@ class OverlayTick(NSObject):
         self.visible = False
         self.last_rect = None
         self.last_color = None
-        self.label_win = create_label_window()
+        self.label_win, self.label_field = create_label_window()
         self.last_cwd = None
 
         return self
@@ -191,9 +190,9 @@ class OverlayTick(NSObject):
                 cwd = data.get("cwd")
                 if cwd:
                     if cwd != self.last_cwd or rect != self.last_rect:
-                        self.label_win._label_field.setStringValue_(cwd)
+                        self.label_field.setStringValue_(cwd)
                         primary_h = CGDisplayBounds(CGMainDisplayID()).size.height
-                        show_label(self.label_win, primary_h, rect[0], rect[1], rect[2])
+                        show_label(self.label_win, self.label_field, primary_h, rect[0], rect[1], rect[2])
                     self.last_cwd = cwd
                 else:
                     if self.last_cwd is not None:
