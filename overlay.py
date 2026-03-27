@@ -94,8 +94,6 @@ class OverlayTick(NSObject):
         if self is None:
             return None
 
-        main_bounds = CGDisplayBounds(CGMainDisplayID())
-        self.primary_h = main_bounds.size.height
         self.win = create_overlay_window()
         self.visible = False
         self.last_rect = None
@@ -127,7 +125,8 @@ class OverlayTick(NSObject):
 
                 rect = (data["x"], data["y"], data["w"], data["h"])
                 if rect != self.last_rect or not self.visible:
-                    show_overlay(self.win, self.primary_h, *rect)
+                    primary_h = CGDisplayBounds(CGMainDisplayID()).size.height
+                    show_overlay(self.win, primary_h, *rect)
                     self.last_rect = rect
                     self.visible = True
             else:
