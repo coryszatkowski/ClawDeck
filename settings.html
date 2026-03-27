@@ -437,7 +437,7 @@
   <div class="row">
     <div>
       <label>Folder Labels</label>
-      <div class="sublabel">Show working directory on buttons and overlay</div>
+      <div class="sublabel">Format for folder name display</div>
     </div>
     <select id="folder_label">
       <option value="last" selected>Last folder</option>
@@ -445,6 +445,26 @@
       <option value="full">Full path</option>
       <option value="off">Off</option>
     </select>
+  </div>
+  <div class="row">
+    <div>
+      <label>Button Labels</label>
+      <div class="sublabel">Show folder name on Stream Deck buttons</div>
+    </div>
+    <div class="toggle">
+      <input type="checkbox" id="button_labels" checked>
+      <div class="slider"></div>
+    </div>
+  </div>
+  <div class="row">
+    <div>
+      <label>Overlay Label</label>
+      <div class="sublabel">Show folder name bar on screen overlay</div>
+    </div>
+    <div class="toggle">
+      <input type="checkbox" id="overlay_label" checked>
+      <div class="slider"></div>
+    </div>
   </div>
 </div>
 
@@ -576,6 +596,8 @@
       document.getElementById('snap_enabled').checked = s.snap_enabled !== false;
       document.getElementById('idle_timeout').value = String(s.idle_timeout != null ? s.idle_timeout : 3600);
       document.getElementById('folder_label').value = s.folder_label || 'last';
+      document.getElementById('button_labels').checked = s.button_labels !== false;
+      document.getElementById('overlay_label').checked = s.overlay_label !== false;
 
       // Colors
       const c = s.colors || {};
@@ -607,6 +629,8 @@
       snap_enabled: document.getElementById('snap_enabled').checked,
       idle_timeout: parseInt(document.getElementById('idle_timeout').value),
       folder_label: document.getElementById('folder_label').value,
+      button_labels: document.getElementById('button_labels').checked,
+      overlay_label: document.getElementById('overlay_label').checked,
     };
 
     // Colors

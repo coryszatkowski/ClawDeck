@@ -298,6 +298,8 @@ CONFIG_DEFAULTS = {
     "idle_timeout": STATUS_STALE_SEC,  # seconds before idle/working status resets to black
     "layout": "default",
     "folder_label": "last",  # "last", "two", "full", "off"
+    "button_labels": True,   # show folder name on Stream Deck buttons
+    "overlay_label": True,   # show folder name bar on screen overlay
     "colors": {
         "active":     _rgb_to_hex(COLOR_BG_ACTIVE),
         "idle":       _rgb_to_hex(COLOR_BG_IDLE),
@@ -895,7 +897,7 @@ return output
             rect = self._get_terminal_rect(terminal_name) if terminal_name else self._grid_rect(self.active_slot)
             active_color = self._color("active", COLOR_BG_ACTIVE)
             raw_cwd = self.slot_cwd.get(self.active_slot)
-            formatted_cwd = self._format_cwd(raw_cwd) if raw_cwd else None
+            formatted_cwd = self._format_cwd(raw_cwd) if raw_cwd and self.config.get("overlay_label", True) else None
             label_text_color = self._color("label_text", (0, 0, 0))
             data = {"visible": True,
                     "x": rect["x"], "y": rect["y"],
@@ -1515,7 +1517,7 @@ end tell
             terminal_name = self._key_to_terminal(i)
             primary = self._terminal_to_active_slot(terminal_name) if terminal_name else i
             raw_cwd = self.slot_cwd.get(primary)
-            subtitle = self._format_cwd(raw_cwd) if raw_cwd else None
+            subtitle = self._format_cwd(raw_cwd) if raw_cwd and self.config.get("button_labels", True) else None
             self.deck.set_key_image(
                 i, self._render_button(label, bg, fg, border_color=border, subtitle=subtitle)
             )
