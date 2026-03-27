@@ -23,6 +23,9 @@ from AppKit import (
     NSWindowStyleMaskBorderless,
     NSBackingStoreBuffered,
     NSFloatingWindowLevel,
+    NSTextField,
+    NSFont,
+    NSTextAlignmentCenter,
 )
 from Foundation import NSObject, NSAutoreleasePool
 from Quartz import CGMainDisplayID, CGDisplayBounds, CGColorCreateGenericRGB
@@ -83,6 +86,58 @@ def hide_overlay(win):
     win.orderOut_(None)
 
 
+LABEL_HEIGHT = 22     # pixels for the folder label bar
+
+
+def create_label_window():
+    """Create a window for the folder label bar at the top of the overlay."""
+    frame = ((0, 0), (1, 1))
+    win = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+        frame,
+        NSWindowStyleMaskBorderless,
+        NSBackingStoreBuffered,
+        False,
+    )
+    win.setLevel_(NSFloatingWindowLevel + 2)  # above the border overlay
+    win.setOpaque_(False)
+    win.setBackgroundColor_(NSColor.clearColor())
+    win.setIgnoresMouseEvents_(True)
+    win.setHasShadow_(False)
+    win.setCollectionBehavior_(1 << 0)  # canJoinAllSpaces
+
+    # Create text field for the label
+    label = NSTextField.alloc().initWithFrame_(((0, 0), (1, LABEL_HEIGHT)))
+    label.setBezeled_(False)
+    label.setDrawsBackground_(True)
+    label.setEditable_(False)
+    label.setSelectable_(False)
+    label.setAlignment_(NSTextAlignmentCenter)
+    label.setFont_(NSFont.fontWithName_size_("Menlo", 12.0) or NSFont.monospacedSystemFontOfSize_weight_(12.0, 0.0))
+    label.setTextColor_(NSColor.blackColor())
+    # Amber background matching border
+    r, g, b = AMBER
+    label.setBackgroundColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(
+        r / 255.0, g / 255.0, b / 255.0, 0.9
+    ))
+
+    win.contentView().addSubview_(label)
+    win._label_field = label  # stash reference
+    return win
+
+
+def show_label(win, primary_h, qx, qy, qw):
+    """Position the label window at the top of the overlay rect."""
+    ns_y = primary_h - qy - LABEL_HEIGHT
+    win.setFrame_display_(((qx, ns_y), (qw, LABEL_HEIGHT)), True)
+    win._label_field.setFrame_(((0, 0), (qw, LABEL_HEIGHT)))
+    win.orderFront_(None)
+
+
+def hide_label(win):
+    """Hide the label window."""
+    win.orderOut_(None)
+
+
 # ── NSObject subclass (only the timer callback) ─────────────────────
 
 class OverlayTick(NSObject):
@@ -98,6 +153,8 @@ class OverlayTick(NSObject):
         self.visible = False
         self.last_rect = None
         self.last_color = None
+        self.label_win = create_label_window()
+        self.last_cwd = None
 
         return self
 
@@ -129,17 +186,34 @@ class OverlayTick(NSObject):
                     show_overlay(self.win, primary_h, *rect)
                     self.last_rect = rect
                     self.visible = True
+
+                # Show/hide folder label
+                cwd = data.get("cwd")
+                if cwd:
+                    if cwd != self.last_cwd or rect != self.last_rect:
+                        self.label_win._label_field.setStringValue_(cwd)
+                        primary_h = CGDisplayBounds(CGMainDisplayID()).size.height
+                        show_label(self.label_win, primary_h, rect[0], rect[1], rect[2])
+                    self.last_cwd = cwd
+                else:
+                    if self.last_cwd is not None:
+                        hide_label(self.label_win)
+                        self.last_cwd = None
             else:
                 if self.visible:
                     hide_overlay(self.win)
+                    hide_label(self.label_win)
                     self.visible = False
                     self.last_rect = None
+                    self.last_cwd = None
 
         except (FileNotFoundError, json.JSONDecodeError, KeyError):
             if self.visible:
                 hide_overlay(self.win)
+                hide_label(self.label_win)
                 self.visible = False
                 self.last_rect = None
+                self.last_cwd = None
 
 
 # ═══════════════════════════════════════════════════════════════════════

@@ -893,10 +893,13 @@ return output
             terminal_name = self._key_to_terminal(self.active_slot)
             rect = self._get_terminal_rect(terminal_name) if terminal_name else self._grid_rect(self.active_slot)
             active_color = self._color("active", COLOR_BG_ACTIVE)
+            raw_cwd = self.slot_cwd.get(self.active_slot)
+            formatted_cwd = self._format_cwd(raw_cwd) if raw_cwd else None
             data = {"visible": True,
                     "x": rect["x"], "y": rect["y"],
                     "w": rect["w"], "h": rect["h"],
-                    "color": list(active_color)}
+                    "color": list(active_color),
+                    "cwd": formatted_cwd}
         else:
             data = {"visible": False}
 
