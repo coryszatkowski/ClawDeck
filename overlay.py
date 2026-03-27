@@ -191,7 +191,8 @@ class OverlayTick(NSObject):
                     self._update_border_color(tuple(color_list))
 
                 rect = (data["x"], data["y"], data["w"], data["h"])
-                if rect != self.last_rect or not self.visible:
+                overlay_moved = rect != self.last_rect or not self.visible
+                if overlay_moved:
                     primary_h = CGDisplayBounds(CGMainDisplayID()).size.height
                     show_overlay(self.win, primary_h, *rect)
                     self.last_rect = rect
@@ -216,7 +217,7 @@ class OverlayTick(NSObject):
                         )
                         self.last_label_text = tuple(text_color)
 
-                    if cwd != self.last_cwd or rect != self.last_rect:
+                    if cwd != self.last_cwd or overlay_moved:
                         self.label_field.setStringValue_(cwd)
                         primary_h = CGDisplayBounds(CGMainDisplayID()).size.height
                         show_label(self.label_win, self.label_field, primary_h, rect[0], rect[1], rect[2])
