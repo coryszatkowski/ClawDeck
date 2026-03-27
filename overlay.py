@@ -105,10 +105,11 @@ def create_label_window():
     win.setHasShadow_(False)
     win.setCollectionBehavior_(1 << 0)  # canJoinAllSpaces
 
-    # Use CALayer for rounded corners on the amber background
+    # Use CALayer for rounded corners on the background
     view = win.contentView()
     view.setWantsLayer_(True)
     layer = view.layer()
+    # Default amber — will be updated dynamically from IPC color
     r, g, b = AMBER
     layer.setBackgroundColor_(CGColorCreateGenericRGB(r / 255.0, g / 255.0, b / 255.0, 1.0))
     layer.setCornerRadius_(CORNER_RADIUS)
@@ -123,7 +124,7 @@ def create_label_window():
     label.setSelectable_(False)
     label.setAlignment_(NSTextAlignmentCenter)
     label.setFont_(NSFont.boldSystemFontOfSize_(16.0))
-    label.setTextColor_(NSColor.blackColor())
+    label.setTextColor_(NSColor.blackColor())  # default — updated dynamically
 
     view.addSubview_(label)
     return win, label
@@ -162,6 +163,8 @@ class OverlayTick(NSObject):
         self.last_color = None
         self.label_win, self.label_field = create_label_window()
         self.last_cwd = None
+        self.last_label_bg = None
+        self.last_label_text = None
 
         return self
 
@@ -197,6 +200,22 @@ class OverlayTick(NSObject):
                 # Show/hide folder label
                 cwd = data.get("cwd")
                 if cwd:
+                    # Update label bar background to match active color
+                    if color_list and tuple(color_list) != self.last_label_bg:
+                        r, g, b = color_list
+                        bg_color = CGColorCreateGenericRGB(r / 255, g / 255, b / 255, 1.0)
+                        self.label_win.contentView().layer().setBackgroundColor_(bg_color)
+                        self.last_label_bg = tuple(color_list)
+
+                    # Update label text color
+                    text_color = data.get("label_text_color")
+                    if text_color and len(text_color) == 3 and tuple(text_color) != self.last_label_text:
+                        r, g, b = text_color
+                        self.label_field.setTextColor_(
+                            NSColor.colorWithCalibratedRed_green_blue_alpha_(r / 255.0, g / 255.0, b / 255.0, 1.0)
+                        )
+                        self.last_label_text = tuple(text_color)
+
                     if cwd != self.last_cwd or rect != self.last_rect:
                         self.label_field.setStringValue_(cwd)
                         primary_h = CGDisplayBounds(CGMainDisplayID()).size.height

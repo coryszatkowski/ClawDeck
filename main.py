@@ -310,6 +310,7 @@ CONFIG_DEFAULTS = {
         "num_5":      _rgb_to_hex(COLOR_BG_NUM_5),
         "arrows":     _rgb_to_hex(COLOR_BG_NAV_ARROW),
         "mic_enter":  _rgb_to_hex(COLOR_BG_NAV_ACTION),
+        "label_text": "#000000",
     },
 }
 
@@ -895,11 +896,13 @@ return output
             active_color = self._color("active", COLOR_BG_ACTIVE)
             raw_cwd = self.slot_cwd.get(self.active_slot)
             formatted_cwd = self._format_cwd(raw_cwd) if raw_cwd else None
+            label_text_color = self._color("label_text", (0, 0, 0))
             data = {"visible": True,
                     "x": rect["x"], "y": rect["y"],
                     "w": rect["w"], "h": rect["h"],
                     "color": list(active_color),
-                    "cwd": formatted_cwd}
+                    "cwd": formatted_cwd,
+                    "label_text_color": list(label_text_color)}
         else:
             data = {"visible": False}
 

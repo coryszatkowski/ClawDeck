@@ -475,6 +475,10 @@
         <input type="color" id="color_active" value="#ffb000">
         <span>Active</span>
       </div>
+      <div class="color-item">
+        <input type="color" id="color_label_text" value="#000000">
+        <span>Label Text</span>
+      </div>
     </div>
   </div>
   <div class="color-group">
@@ -575,7 +579,7 @@
 
       // Colors
       const c = s.colors || {};
-      const colorFields = ['active','idle','working','permission','num_1','num_2','num_3','num_4','num_5','arrows','mic_enter'];
+      const colorFields = ['active','idle','working','permission','num_1','num_2','num_3','num_4','num_5','arrows','mic_enter','label_text'];
       colorFields.forEach(k => {
         const el = document.getElementById('color_' + k);
         if (el && c[k]) el.value = c[k];
@@ -606,7 +610,7 @@
     };
 
     // Colors
-    const colorFields = ['active','idle','working','permission','num_1','num_2','num_3','num_4','num_5','arrows','mic_enter'];
+    const colorFields = ['active','idle','working','permission','num_1','num_2','num_3','num_4','num_5','arrows','mic_enter','label_text'];
     config.colors = {};
     colorFields.forEach(k => {
       const el = document.getElementById('color_' + k);
