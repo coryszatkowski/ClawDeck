@@ -1164,6 +1164,7 @@ end tell
             self._snap_candidates.clear()
             # Rebuild TTY map since windows moved
             self._build_tty_map()
+            self._update_overlay()
         else:
             self._prev_win_positions = current_positions
 

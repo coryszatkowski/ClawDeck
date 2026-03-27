@@ -163,6 +163,7 @@ class OverlayTick(NSObject):
         self.last_color = None
         self.label_win, self.label_field = create_label_window()
         self.last_cwd = None
+        self.label_visible = False
         self.last_label_bg = None
         self.last_label_text = None
 
@@ -217,20 +218,23 @@ class OverlayTick(NSObject):
                         )
                         self.last_label_text = tuple(text_color)
 
-                    if cwd != self.last_cwd or overlay_moved:
+                    if cwd != self.last_cwd or overlay_moved or not self.label_visible:
                         self.label_field.setStringValue_(cwd)
                         primary_h = CGDisplayBounds(CGMainDisplayID()).size.height
                         show_label(self.label_win, self.label_field, primary_h, rect[0], rect[1], rect[2])
+                        self.label_visible = True
                     self.last_cwd = cwd
                 else:
-                    if self.last_cwd is not None:
+                    if self.label_visible:
                         hide_label(self.label_win)
+                        self.label_visible = False
                         self.last_cwd = None
             else:
                 if self.visible:
                     hide_overlay(self.win)
                     hide_label(self.label_win)
                     self.visible = False
+                    self.label_visible = False
                     self.last_rect = None
                     self.last_cwd = None
 
@@ -239,6 +243,7 @@ class OverlayTick(NSObject):
                 hide_overlay(self.win)
                 hide_label(self.label_win)
                 self.visible = False
+                self.label_visible = False
                 self.last_rect = None
                 self.last_cwd = None
 
