@@ -27,7 +27,7 @@ Three bugs, three commits, one branch.
 
 **Fix (overlay.py):** Re-read `CGDisplayBounds(CGMainDisplayID())` each tick instead of caching. This is a single C call — negligible cost at 100ms intervals.
 
-**Fix (main.py):** Add a `_refresh_screen_bounds()` call in the poll loop, throttled to once every 30 seconds (same cadence as TTY refresh). If bounds changed, update `self.screen`, re-tile windows, and update overlay. This handles sleep/wake without needing a sleep/wake notification listener.
+**Fix (main.py):** ~~Add periodic screen bounds refresh~~ **REVERTED** — `_get_screen_bounds()` follows the mouse cursor, so periodic refresh re-tiles terminals to whichever monitor the mouse is on. Caching the display ID wasn't reliable. The overlay.py fix alone handles the coordinate conversion. A proper main.py fix would need IOKit sleep/wake notifications instead of polling — deferred to a future wave.
 
 ---
 
@@ -41,7 +41,7 @@ Additionally, `_check_snap_to_grid` doesn't exempt the controller window — if 
 
 **Fix:** Two changes:
 1. In `_get_frontmost_slot()`: after finding the frontmost terminal window, check if it's the controller's window (by TTY match, same logic as `_find_controller_window`). If it is, always return slot 14 regardless of position.
-2. In `_check_snap_to_grid()`: skip snapping the controller's window entirely (or always snap it to slot 14). The controller window should never leave slot 14.
+2. In `_check_snap_to_grid()`: if the snapped window is the controller's, always snap it to slot 14 instead of the nearest zone. The controller window should never leave slot 14.
 
 To support both fixes efficiently, cache the controller's window ID (Quartz `kCGWindowID`) after `tile_windows()` and refresh it during TTY map rebuilds. This avoids running AppleScript TTY queries every 200ms poll.
 
