@@ -297,6 +297,7 @@ CONFIG_DEFAULTS = {
     "mic_command": "fn",   # "fn" = double fn press, anything else = shell command
     "idle_timeout": STATUS_STALE_SEC,  # seconds before idle/working status resets to black
     "layout": "default",
+    "folder_label": "last",  # "last", "two", "full", "off"
     "colors": {
         "active":     _rgb_to_hex(COLOR_BG_ACTIVE),
         "idle":       _rgb_to_hex(COLOR_BG_IDLE),
@@ -324,6 +325,7 @@ class DeckController:
         self.screen = self._get_screen_bounds()
         self._init_fonts()
         self.slot_tty = {}            # slot -> tty name (e.g. "ttys003")
+        self.slot_cwd = {}            # slot -> cwd path string
         self.slot_status = {}         # slot -> "idle"|"working"|"permission"|None
         self.blink_on = True          # toggles every BLINK_INTERVAL for red blink
         self._last_blink_toggle = time.time()
@@ -626,6 +628,76 @@ class DeckController:
                         break
 
         self.slot_tty = tty_map
+
+        # Resolve CWD for each mapped TTY
+        cwd_map = {}
+        for slot, tty in tty_map.items():
+            cwd = self._resolve_tty_cwd(tty)
+            if cwd:
+                cwd_map[slot] = cwd
+        self.slot_cwd = cwd_map
+
+    def _resolve_tty_cwd(self, tty_name):
+        """Get the working directory of the shell process on a TTY.
+        Returns the path string, or None if it can't be resolved."""
+        try:
+            # Find shell PID on this TTY
+            result = subprocess.run(
+                ["ps", "-t", tty_name, "-o", "pid=,comm="],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode != 0:
+                return None
+
+            shell_pid = None
+            for line in result.stdout.strip().split("\n"):
+                parts = line.strip().split(None, 1)
+                if len(parts) == 2:
+                    comm = parts[1].strip().lstrip("-")
+                    if comm in ("zsh", "bash", "fish"):
+                        shell_pid = parts[0].strip()
+                        break
+            if not shell_pid:
+                return None
+
+            # Get CWD from the shell process
+            result = subprocess.run(
+                ["lsof", "-a", "-p", shell_pid, "-d", "cwd", "-Fn"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode != 0:
+                return None
+
+            for line in result.stdout.strip().split("\n"):
+                if line.startswith("n"):
+                    return line[1:]  # strip the 'n' prefix
+            return None
+        except Exception:
+            logger.debug("Failed to resolve CWD for %s", tty_name, exc_info=True)
+            return None
+
+    def _format_cwd(self, path):
+        """Format a CWD path according to the folder_label config setting.
+        Returns the formatted string for display."""
+        if not path:
+            return None
+        mode = self.config.get("folder_label", "last")
+        if mode == "off":
+            return None
+
+        home = str(Path.home())
+        if path.startswith(home):
+            tilde_path = "~" + path[len(home):]
+        else:
+            tilde_path = path
+
+        if mode == "full":
+            return tilde_path
+        elif mode == "two":
+            parts = Path(path).parts
+            return "/".join(parts[-2:]) if len(parts) >= 2 else parts[-1]
+        else:  # "last"
+            return Path(path).name
 
     def _get_app_window_ttys(self, app_name):
         """Get TTY and bounds for each window of a terminal app via AppleScript.
