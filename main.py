@@ -593,6 +593,7 @@ class DeckController:
         self.font_sm = load(12)
         self.font_md = load(18)
         self.font_lg = load(26)
+        self.font_xs = load(9)
 
     def _pick_font(self, label):
         if len(label) <= 2:
@@ -1414,9 +1415,10 @@ end tell
     # ─── Button Rendering ────────────────────────────────────────────
 
     def _render_button(self, label, bg=COLOR_BG_DEFAULT, fg=COLOR_FG_DEFAULT,
-                       border_color=None, border_width=8):
+                       border_color=None, border_width=8, subtitle=None):
         """Create a button image for the Stream Deck.
-        If border_color is set, draws a colored border around the button."""
+        If border_color is set, draws a colored border around the button.
+        If subtitle is set, draws a dark bar across the top with the subtitle text."""
         image = PILHelper.create_image(self.deck, background=bg)
         draw = ImageDraw.Draw(image)
         w, h = image.size
@@ -1429,12 +1431,33 @@ end tell
                     outline=border_color,
                 )
 
+        # Draw subtitle bar across top
+        bar_h = 0
+        if subtitle:
+            bar_h = 16
+            draw.rectangle([0, 0, w, bar_h], fill=(0, 0, 0, 153))
+            # Truncate subtitle if too wide
+            sub_bbox = draw.textbbox((0, 0), subtitle, font=self.font_xs)
+            sub_tw = sub_bbox[2] - sub_bbox[0]
+            if sub_tw > w - 4:
+                while sub_tw > w - 10 and len(subtitle) > 3:
+                    subtitle = subtitle[:-1]
+                    sub_bbox = draw.textbbox((0, 0), subtitle + "…", font=self.font_xs)
+                    sub_tw = sub_bbox[2] - sub_bbox[0]
+                subtitle = subtitle + "…"
+                sub_bbox = draw.textbbox((0, 0), subtitle, font=self.font_xs)
+                sub_tw = sub_bbox[2] - sub_bbox[0]
+            sub_x = (w - sub_tw) / 2
+            sub_y = (bar_h - (sub_bbox[3] - sub_bbox[1])) / 2 - 1
+            draw.text((sub_x, sub_y), subtitle, font=self.font_xs, fill=(255, 255, 255))
+
+        # Draw main label (shifted down if subtitle present)
         font = self._pick_font(label)
         bbox = draw.textbbox((0, 0), label, font=font)
         tw = bbox[2] - bbox[0]
         th = bbox[3] - bbox[1]
         x = (w - tw) / 2
-        y = (h - th) / 2 - 2
+        y = (h - th) / 2 - 2 + (bar_h / 2 if bar_h else 0)
         draw.text((x, y), label, font=font, fill=fg)
         return PILHelper.to_native_format(self.deck, image)
 
@@ -1482,10 +1505,15 @@ end tell
         for i in range(DECK_TERMINAL_SLOTS):
             label = layout[i] if i < len(layout) else f"T{i+1}"
             bg, fg, border = self._get_slot_style(i)
+            # Resolve CWD subtitle for this slot
+            terminal_name = self._key_to_terminal(i)
+            primary = self._terminal_to_active_slot(terminal_name) if terminal_name else i
+            raw_cwd = self.slot_cwd.get(primary)
+            subtitle = self._format_cwd(raw_cwd) if raw_cwd else None
             self.deck.set_key_image(
-                i, self._render_button(label, bg, fg, border_color=border)
+                i, self._render_button(label, bg, fg, border_color=border, subtitle=subtitle)
             )
-        # Enter key (always present)
+        # Enter key (always present, no subtitle)
         self.deck.set_key_image(
             ENTER_KEY_INDEX,
             self._render_button("⏎", COLOR_BG_ENTER, COLOR_FG_ENTER),
