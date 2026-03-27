@@ -113,7 +113,7 @@ def create_label_window():
     layer.setBackgroundColor_(CGColorCreateGenericRGB(r / 255.0, g / 255.0, b / 255.0, 1.0))
     layer.setCornerRadius_(CORNER_RADIUS)
     # Only round top corners by masking bottom
-    layer.setMaskedCorners_(1 << 0 | 1 << 1)  # kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner (AppKit bottom = visual top)
+    layer.setMaskedCorners_(1 << 2 | 1 << 3)  # kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner (AppKit top = visual top)
 
     # Create text field — no background, vertically centered via frame offset
     label = NSTextField.alloc().initWithFrame_(((0, 0), (1, LABEL_HEIGHT)))
