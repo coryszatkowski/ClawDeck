@@ -1654,9 +1654,13 @@ end tell
                     # Periodically refresh TTY map so new/changed terminals get picked up
                     now_tty = time.time()
                     if now_tty - self._last_tty_refresh >= TTY_MAP_REFRESH_SEC:
+                        old_cwd = dict(self.slot_cwd)
                         self._build_tty_map()
                         self._refresh_controller_win_id()
                         self._last_tty_refresh = now_tty
+                        if self.slot_cwd != old_cwd:
+                            self._update_overlay()
+                            needs_redraw = True
 
                     # Snap-to-grid: detect dragged windows and snap them
                     if self.config["snap_enabled"] and self._check_snap_to_grid():
