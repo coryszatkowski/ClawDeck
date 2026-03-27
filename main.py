@@ -508,26 +508,32 @@ class DeckController:
             })
         return results
 
-    def _get_screen_bounds(self):
-        """Get the usable frame of the screen where the user's mouse cursor is.
+    def _get_screen_bounds(self, display_id=None):
+        """Get the usable frame of a display.
+        If display_id is provided, use that display directly.
+        Otherwise, find the display containing the mouse cursor.
         Uses Quartz CGDisplay (top-left coords natively) to avoid NSScreen
         coordinate conversion issues."""
-        # Get mouse position in Quartz coords (top-left origin)
-        event = CGEventCreate(None)
-        mouse = CGEventGetLocation(event) if event else None
+        if display_id is not None:
+            target_display = display_id
+        else:
+            # Get mouse position in Quartz coords (top-left origin)
+            event = CGEventCreate(None)
+            mouse = CGEventGetLocation(event) if event else None
 
-        # Get all active displays
-        err, display_ids, count = CGGetActiveDisplayList(16, None, None)
+            # Get all active displays
+            err, display_ids, count = CGGetActiveDisplayList(16, None, None)
 
-        # Find the display containing the mouse cursor
-        target_display = CGMainDisplayID()  # fallback
-        if mouse and display_ids:
-            for did in display_ids[:count]:
-                b = CGDisplayBounds(did)
-                if (b.origin.x <= mouse.x <= b.origin.x + b.size.width
-                        and b.origin.y <= mouse.y <= b.origin.y + b.size.height):
-                    target_display = did
-                    break
+            # Find the display containing the mouse cursor
+            target_display = CGMainDisplayID()  # fallback
+            if mouse and display_ids:
+                for did in display_ids[:count]:
+                    b = CGDisplayBounds(did)
+                    if (b.origin.x <= mouse.x <= b.origin.x + b.size.width
+                            and b.origin.y <= mouse.y <= b.origin.y + b.size.height):
+                        target_display = did
+                        break
+            self._target_display_id = target_display
 
         disp_bounds = CGDisplayBounds(target_display)
 
@@ -1553,7 +1559,7 @@ end tell
 
                     # Periodically recheck display bounds (handles sleep/wake)
                     if now_tty - self._last_screen_refresh >= SCREEN_REFRESH_SEC:
-                        new_screen = self._get_screen_bounds()
+                        new_screen = self._get_screen_bounds(display_id=getattr(self, '_target_display_id', None))
                         if new_screen != self.screen:
                             logger.info("Display bounds changed: %s -> %s", self.screen, new_screen)
                             self.screen = new_screen
