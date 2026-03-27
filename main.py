@@ -120,7 +120,7 @@ STATUS_STALE_SEC = 3600         # ignore idle/working status after 1 hour
 PENDING_INFER_SEC = 2.0         # if "pending" (PreToolUse) sits this long → infer permission
 BLINK_INTERVAL = 0.5            # seconds per blink phase (on/off) for permission
 TTY_MAP_REFRESH_SEC = 30        # rebuild TTY map every N seconds
-ACTIVE_CWD_REFRESH_SEC = 5     # recheck active slot's CWD every N seconds
+ACTIVE_CWD_REFRESH_SEC = 1     # recheck active slot's CWD every N seconds
 BRIGHTNESS = 80                 # Stream Deck brightness (0-100)
 
 # Colors (R, G, B)
@@ -646,8 +646,8 @@ class DeckController:
             cwd = self._resolve_tty_cwd(tty)
             if cwd:
                 cwd_map[slot] = cwd
-        logger.info("TTY map: %s", tty_map)
-        logger.info("CWD map: %s", {s: Path(c).name for s, c in cwd_map.items()})
+        logger.debug("TTY map: %s", tty_map)
+        logger.debug("CWD map: %s", {s: Path(c).name for s, c in cwd_map.items()})
         self.slot_cwd = cwd_map
 
     def _resolve_tty_cwd(self, tty_name):
@@ -687,7 +687,7 @@ class DeckController:
                     return line[1:]  # strip the 'n' prefix
             return None
         except Exception:
-            logger.info("Failed to resolve CWD for %s", tty_name, exc_info=True)
+            logger.debug("Failed to resolve CWD for %s", tty_name, exc_info=True)
             return None
 
     def _format_cwd(self, path):
