@@ -610,7 +610,9 @@ class DeckController:
     def _build_tty_map(self):
         """Map each terminal's primary slot to its TTY.
         Uses AppleScript to get the TTY for each window (per app), then
-        matches window positions to layout terminal zones."""
+        matches window positions to layout terminal zones.
+        Only the first (frontmost) window per zone is used — behind
+        windows at the same position are ignored."""
         tty_map = {}
 
         # Get TTY + bounds for each window, grouped by app
@@ -620,6 +622,8 @@ class DeckController:
                 continue
 
             # Match each window to a terminal zone by position
+            # Skip zones already claimed — AppleScript returns front-to-back,
+            # so the first match is the frontmost window at that position.
             for info in window_ttys:
                 win_cx = info["x"] + info["w"] / 2
                 win_cy = info["y"] + info["h"] / 2
@@ -628,7 +632,8 @@ class DeckController:
                     if (r["x"] <= win_cx <= r["x"] + r["w"]
                             and r["y"] <= win_cy <= r["y"] + r["h"]):
                         primary = self._terminal_to_active_slot(name)
-                        tty_map[primary] = info["tty"]
+                        if primary not in tty_map:
+                            tty_map[primary] = info["tty"]
                         break
 
         self.slot_tty = tty_map
@@ -726,27 +731,21 @@ tell application "Terminal"
 end tell
 '''
         elif app_name in ("iTerm2", "iTerm"):
-            # iTerm2: use System Events for position/size, iTerm2 for tty
+            # iTerm2: get bounds + tty entirely from iTerm2 scripting.
+            # Previous approach mixed System Events (position) with iTerm2 (tty),
+            # which could mismatch when window ordering differs between the two.
             script = '''
-set output to ""
 tell application "iTerm2"
-    set winCount to count of windows
+    set output to ""
+    repeat with i from 1 to count of windows
+        try
+            set b to bounds of window i
+            set t to tty of current session of current tab of window i
+            set output to output & (item 1 of b as text) & "," & (item 2 of b as text) & "," & (item 3 of b as text) & "," & (item 4 of b as text) & "," & t & linefeed
+        end try
+    end repeat
+    return output
 end tell
-tell application "System Events"
-    tell process "iTerm2"
-        repeat with i from 1 to winCount
-            try
-                set p to position of window i
-                set s to size of window i
-                tell application "iTerm2"
-                    set t to tty of current session of current tab of window i
-                end tell
-                set output to output & (item 1 of p as text) & "," & (item 2 of p as text) & "," & ((item 1 of p) + (item 1 of s) as text) & "," & ((item 2 of p) + (item 2 of s) as text) & "," & t & linefeed
-            end try
-        end repeat
-    end tell
-end tell
-return output
 '''
         else:
             return []
