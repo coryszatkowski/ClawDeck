@@ -334,6 +334,7 @@ class DeckController:
         # Snap-to-grid: track window positions to detect drag-and-drop
         self._prev_win_positions = {}   # window_id -> (x, y, w, h)
         self._snap_candidates = {}     # window_id -> {pos, polls_stable, win}
+        self._controller_win_id = None  # Quartz window ID of the controller terminal
 
     # ─── Config ───────────────────────────────────────────────────────
 
@@ -888,6 +889,13 @@ return output
                             return win
         return None
 
+    def _refresh_controller_win_id(self):
+        """Update the cached controller window ID by re-matching TTY."""
+        term_wins = self._get_terminal_windows()
+        controller_win = self._find_controller_window(term_wins)
+        if controller_win:
+            self._controller_win_id = controller_win["id"]
+
     def tile_windows(self):
         """Arrange terminal windows according to the current layout.
         The controller's own terminal is always placed in slot 14 (bottom-right).
@@ -909,6 +917,9 @@ return output
         if controller_win:
             logger.info("Controller terminal -> slot 14")
             self._move_window_to_rect(controller_win, self._grid_rect(GRID_SLOTS - 1))
+            self._controller_win_id = controller_win["id"]
+        else:
+            self._controller_win_id = None
 
         # Get terminal zones from layout
         terminal_names = self._get_terminal_names()
@@ -1038,12 +1049,19 @@ end tell
                     if cand["polls_stable"] >= SNAP_SETTLE_POLLS:
                         # Window has settled — snap if not already in a slot
                         if not self._is_snapped(win):
-                            best_terminal = self._find_nearest_empty_terminal(win)
-                            if best_terminal is not None:
-                                r = self._get_terminal_rect(best_terminal)
-                                logger.info("Snapping window to %s", best_terminal)
+                            # Controller always snaps to slot 14
+                            if wid == self._controller_win_id:
+                                r = self._grid_rect(ENTER_KEY_INDEX)
+                                logger.info("Snapping controller window to slot 14")
                                 self._move_window_to_rect(win, r)
                                 snapped_any = True
+                            else:
+                                best_terminal = self._find_nearest_empty_terminal(win)
+                                if best_terminal is not None:
+                                    r = self._get_terminal_rect(best_terminal)
+                                    logger.info("Snapping window to %s", best_terminal)
+                                    self._move_window_to_rect(win, r)
+                                    snapped_any = True
                         del self._snap_candidates[wid]
                 else:
                     # Moved again to a new spot — reset
@@ -1179,6 +1197,10 @@ end tell
             bh = bounds.get("Height", 0)
             if bw < 100 or bh < 100:
                 continue
+            # If this is the controller window, always slot 14
+            win_id = w.get("kCGWindowNumber", 0)
+            if win_id and win_id == self._controller_win_id:
+                return ENTER_KEY_INDEX
             win_cx = bounds.get("X", 0) + bw / 2
             win_cy = bounds.get("Y", 0) + bh / 2
             # Match against terminal zones (handles merged slots)
@@ -1523,6 +1545,7 @@ end tell
                     now_tty = time.time()
                     if now_tty - self._last_tty_refresh >= TTY_MAP_REFRESH_SEC:
                         self._build_tty_map()
+                        self._refresh_controller_win_id()
                         self._last_tty_refresh = now_tty
 
                     # Periodically recheck display bounds (handles sleep/wake)
