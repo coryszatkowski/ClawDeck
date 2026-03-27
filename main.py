@@ -895,6 +895,8 @@ return output
         controller_win = self._find_controller_window(term_wins)
         if controller_win:
             self._controller_win_id = controller_win["id"]
+        else:
+            self._controller_win_id = None
 
     def tile_windows(self):
         """Arrange terminal windows according to the current layout.
