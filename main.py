@@ -120,6 +120,7 @@ STATUS_STALE_SEC = 3600         # ignore idle/working status after 1 hour
 PENDING_INFER_SEC = 2.0         # if "pending" (PreToolUse) sits this long → infer permission
 BLINK_INTERVAL = 0.5            # seconds per blink phase (on/off) for permission
 TTY_MAP_REFRESH_SEC = 30        # rebuild TTY map every N seconds
+ACTIVE_CWD_REFRESH_SEC = 5     # recheck active slot's CWD every N seconds
 BRIGHTNESS = 80                 # Stream Deck brightness (0-100)
 
 # Colors (R, G, B)
@@ -334,6 +335,7 @@ class DeckController:
         self._last_blink_toggle = time.time()
         self.overlay_proc = None      # subprocess for screen border overlay
         self._last_tty_refresh = 0    # force immediate TTY map build
+        self._last_active_cwd_check = 0  # fast CWD refresh for active slot
 
         # Snap-to-grid: track window positions to detect drag-and-drop
         self._prev_win_positions = {}   # window_id -> (x, y, w, h)
@@ -1674,6 +1676,18 @@ end tell
                         self.active_slot = slot  # None when non-terminal is frontmost
                         self._update_overlay()
                         needs_redraw = True
+
+                    # Fast CWD refresh for active slot only (every 5s)
+                    if self.active_slot is not None and now_tty - self._last_active_cwd_check >= ACTIVE_CWD_REFRESH_SEC:
+                        tty = self.slot_tty.get(self.active_slot)
+                        if tty:
+                            cwd = self._resolve_tty_cwd(tty)
+                            old_cwd = self.slot_cwd.get(self.active_slot)
+                            if cwd and cwd != old_cwd:
+                                self.slot_cwd[self.active_slot] = cwd
+                                self._update_overlay()
+                                needs_redraw = True
+                        self._last_active_cwd_check = now_tty
 
                     # Read Claude Code status from hook files
                     old_status = dict(self.slot_status)
