@@ -120,7 +120,6 @@ STATUS_STALE_SEC = 3600         # ignore idle/working status after 1 hour
 PENDING_INFER_SEC = 2.0         # if "pending" (PreToolUse) sits this long → infer permission
 BLINK_INTERVAL = 0.5            # seconds per blink phase (on/off) for permission
 TTY_MAP_REFRESH_SEC = 30        # rebuild TTY map every N seconds
-SCREEN_REFRESH_SEC = 30         # recheck display bounds every N seconds
 BRIGHTNESS = 80                 # Stream Deck brightness (0-100)
 
 # Colors (R, G, B)
@@ -330,7 +329,7 @@ class DeckController:
         self._last_blink_toggle = time.time()
         self.overlay_proc = None      # subprocess for screen border overlay
         self._last_tty_refresh = 0    # force immediate TTY map build
-        self._last_screen_refresh = 0   # force immediate screen bounds check
+
         # Snap-to-grid: track window positions to detect drag-and-drop
         self._prev_win_positions = {}   # window_id -> (x, y, w, h)
         self._snap_candidates = {}     # window_id -> {pos, polls_stable, win}
@@ -508,32 +507,26 @@ class DeckController:
             })
         return results
 
-    def _get_screen_bounds(self, display_id=None):
-        """Get the usable frame of a display.
-        If display_id is provided, use that display directly.
-        Otherwise, find the display containing the mouse cursor.
+    def _get_screen_bounds(self):
+        """Get the usable frame of the screen where the user's mouse cursor is.
         Uses Quartz CGDisplay (top-left coords natively) to avoid NSScreen
         coordinate conversion issues."""
-        if display_id is not None:
-            target_display = display_id
-        else:
-            # Get mouse position in Quartz coords (top-left origin)
-            event = CGEventCreate(None)
-            mouse = CGEventGetLocation(event) if event else None
+        # Get mouse position in Quartz coords (top-left origin)
+        event = CGEventCreate(None)
+        mouse = CGEventGetLocation(event) if event else None
 
-            # Get all active displays
-            err, display_ids, count = CGGetActiveDisplayList(16, None, None)
+        # Get all active displays
+        err, display_ids, count = CGGetActiveDisplayList(16, None, None)
 
-            # Find the display containing the mouse cursor
-            target_display = CGMainDisplayID()  # fallback
-            if mouse and display_ids:
-                for did in display_ids[:count]:
-                    b = CGDisplayBounds(did)
-                    if (b.origin.x <= mouse.x <= b.origin.x + b.size.width
-                            and b.origin.y <= mouse.y <= b.origin.y + b.size.height):
-                        target_display = did
-                        break
-            self._target_display_id = target_display
+        # Find the display containing the mouse cursor
+        target_display = CGMainDisplayID()  # fallback
+        if mouse and display_ids:
+            for did in display_ids[:count]:
+                b = CGDisplayBounds(did)
+                if (b.origin.x <= mouse.x <= b.origin.x + b.size.width
+                        and b.origin.y <= mouse.y <= b.origin.y + b.size.height):
+                    target_display = did
+                    break
 
         disp_bounds = CGDisplayBounds(target_display)
 
@@ -1556,19 +1549,6 @@ end tell
                         self._build_tty_map()
                         self._refresh_controller_win_id()
                         self._last_tty_refresh = now_tty
-
-                    # Periodically recheck display bounds (handles sleep/wake)
-                    if now_tty - self._last_screen_refresh >= SCREEN_REFRESH_SEC:
-                        new_screen = self._get_screen_bounds(display_id=getattr(self, '_target_display_id', None))
-                        if new_screen != self.screen:
-                            logger.info("Display bounds changed: %s -> %s", self.screen, new_screen)
-                            self.screen = new_screen
-                            self.tile_windows()
-                            time.sleep(0.3)
-                            self._build_tty_map()
-                            self._update_overlay()
-                            needs_redraw = True
-                        self._last_screen_refresh = now_tty
 
                     # Snap-to-grid: detect dragged windows and snap them
                     if self.config["snap_enabled"] and self._check_snap_to_grid():
