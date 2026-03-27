@@ -706,10 +706,12 @@
     document.getElementById('brightnessVal').textContent = this.value;
   });
 
-  // Toggle click handler
-  document.querySelector('.toggle').addEventListener('click', function() {
-    const cb = this.querySelector('input');
-    cb.checked = !cb.checked;
+  // Toggle click handlers
+  document.querySelectorAll('.toggle').forEach(function(toggle) {
+    toggle.addEventListener('click', function() {
+      const cb = this.querySelector('input');
+      cb.checked = !cb.checked;
+    });
   });
 
   // Load on start
