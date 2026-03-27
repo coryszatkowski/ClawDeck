@@ -434,6 +434,18 @@
       <option value="0">Never</option>
     </select>
   </div>
+  <div class="row">
+    <div>
+      <label>Folder Labels</label>
+      <div class="sublabel">Show working directory on buttons and overlay</div>
+    </div>
+    <select id="folder_label">
+      <option value="last" selected>Last folder</option>
+      <option value="two">Last two folders</option>
+      <option value="full">Full path</option>
+      <option value="off">Off</option>
+    </select>
+  </div>
 </div>
 
 <div class="section">
@@ -559,6 +571,7 @@
       document.getElementById('poll_interval').value = s.poll_interval || 0.2;
       document.getElementById('snap_enabled').checked = s.snap_enabled !== false;
       document.getElementById('idle_timeout').value = String(s.idle_timeout != null ? s.idle_timeout : 3600);
+      document.getElementById('folder_label').value = s.folder_label || 'last';
 
       // Colors
       const c = s.colors || {};
@@ -589,6 +602,7 @@
       poll_interval: parseFloat(document.getElementById('poll_interval').value),
       snap_enabled: document.getElementById('snap_enabled').checked,
       idle_timeout: parseInt(document.getElementById('idle_timeout').value),
+      folder_label: document.getElementById('folder_label').value,
     };
 
     // Colors
