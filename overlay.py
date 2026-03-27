@@ -86,7 +86,7 @@ def hide_overlay(win):
     win.orderOut_(None)
 
 
-LABEL_HEIGHT = 22     # pixels for the folder label bar
+LABEL_HEIGHT = 26     # pixels for the folder label bar
 
 
 def create_label_window():
@@ -112,12 +112,12 @@ def create_label_window():
     label.setEditable_(False)
     label.setSelectable_(False)
     label.setAlignment_(NSTextAlignmentCenter)
-    label.setFont_(NSFont.fontWithName_size_("Menlo", 12.0) or NSFont.monospacedSystemFontOfSize_weight_(12.0, 0.0))
+    label.setFont_(NSFont.boldSystemFontOfSize_(16.0))
     label.setTextColor_(NSColor.blackColor())
-    # Amber background matching border
+    # Amber background matching border (fully opaque)
     r, g, b = AMBER
     label.setBackgroundColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(
-        r / 255.0, g / 255.0, b / 255.0, 0.9
+        r / 255.0, g / 255.0, b / 255.0, 1.0
     ))
 
     win.contentView().addSubview_(label)
