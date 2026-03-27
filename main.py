@@ -120,6 +120,7 @@ STATUS_STALE_SEC = 3600         # ignore idle/working status after 1 hour
 PENDING_INFER_SEC = 2.0         # if "pending" (PreToolUse) sits this long → infer permission
 BLINK_INTERVAL = 0.5            # seconds per blink phase (on/off) for permission
 TTY_MAP_REFRESH_SEC = 30        # rebuild TTY map every N seconds
+SCREEN_REFRESH_SEC = 30         # recheck display bounds every N seconds
 BRIGHTNESS = 80                 # Stream Deck brightness (0-100)
 
 # Colors (R, G, B)
@@ -329,6 +330,7 @@ class DeckController:
         self._last_blink_toggle = time.time()
         self.overlay_proc = None      # subprocess for screen border overlay
         self._last_tty_refresh = 0    # force immediate TTY map build
+        self._last_screen_refresh = 0   # force immediate screen bounds check
         # Snap-to-grid: track window positions to detect drag-and-drop
         self._prev_win_positions = {}   # window_id -> (x, y, w, h)
         self._snap_candidates = {}     # window_id -> {pos, polls_stable, win}
@@ -1522,6 +1524,19 @@ end tell
                     if now_tty - self._last_tty_refresh >= TTY_MAP_REFRESH_SEC:
                         self._build_tty_map()
                         self._last_tty_refresh = now_tty
+
+                    # Periodically recheck display bounds (handles sleep/wake)
+                    if now_tty - self._last_screen_refresh >= SCREEN_REFRESH_SEC:
+                        new_screen = self._get_screen_bounds()
+                        if new_screen != self.screen:
+                            logger.info("Display bounds changed: %s -> %s", self.screen, new_screen)
+                            self.screen = new_screen
+                            self.tile_windows()
+                            time.sleep(0.3)
+                            self._build_tty_map()
+                            self._update_overlay()
+                            needs_redraw = True
+                        self._last_screen_refresh = now_tty
 
                     # Snap-to-grid: detect dragged windows and snap them
                     if self.config["snap_enabled"] and self._check_snap_to_grid():
