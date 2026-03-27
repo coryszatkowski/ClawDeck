@@ -1188,9 +1188,6 @@ end tell
             kCGNullWindowID,
         )
         for w in windows or []:
-            owner = w.get("kCGWindowOwnerName", "")
-            if owner not in TERMINAL_APPS:
-                continue
             layer = w.get("kCGWindowLayer", 0)
             if layer != 0:  # normal windows are layer 0
                 continue
@@ -1199,6 +1196,10 @@ end tell
             bh = bounds.get("Height", 0)
             if bw < 100 or bh < 100:
                 continue
+            # First real window — if it's not a terminal app, no terminal is frontmost
+            owner = w.get("kCGWindowOwnerName", "")
+            if owner not in TERMINAL_APPS:
+                return None
             # If this is the controller window, always slot 14
             win_id = w.get("kCGWindowNumber", 0)
             if win_id and win_id == self._controller_win_id:
