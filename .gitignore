@@ -7,5 +7,7 @@ overlay.log
 config.json
 TODO.md
 CLAUDE.md
+.claude/
 build/
 dist/
+.superpowers/

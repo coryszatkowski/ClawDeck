@@ -41,6 +41,36 @@ import sys
 import json
 import os
 from pathlib import Path
+import logging
+from logging.handlers import RotatingFileHandler
+
+def _setup_logging():
+    """Configure clawdeck logger with console and file handlers."""
+    log_dir = Path.home() / ".clawdeck"
+    log_dir.mkdir(exist_ok=True)
+
+    logger = logging.getLogger("clawdeck")
+    logger.setLevel(logging.DEBUG)
+
+    # Console: INFO and above
+    console = logging.StreamHandler()
+    console.setLevel(logging.INFO)
+    console.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+    logger.addHandler(console)
+
+    # File: DEBUG and above, rotating 1MB x 3 backups
+    file_handler = RotatingFileHandler(
+        log_dir / "clawdeck.log", maxBytes=1_000_000, backupCount=3
+    )
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+    ))
+    logger.addHandler(file_handler)
+
+    return logger
+
+logger = _setup_logging()
 
 from PIL import Image, ImageDraw, ImageFont
 from StreamDeck.DeviceManager import DeviceManager
@@ -90,6 +120,7 @@ STATUS_STALE_SEC = 3600         # ignore idle/working status after 1 hour
 PENDING_INFER_SEC = 2.0         # if "pending" (PreToolUse) sits this long → infer permission
 BLINK_INTERVAL = 0.5            # seconds per blink phase (on/off) for permission
 TTY_MAP_REFRESH_SEC = 30        # rebuild TTY map every N seconds
+ACTIVE_CWD_REFRESH_SEC = 1     # recheck active slot's CWD every N seconds
 BRIGHTNESS = 80                 # Stream Deck brightness (0-100)
 
 # Colors (R, G, B)
@@ -267,6 +298,9 @@ CONFIG_DEFAULTS = {
     "mic_command": "fn",   # "fn" = double fn press, anything else = shell command
     "idle_timeout": STATUS_STALE_SEC,  # seconds before idle/working status resets to black
     "layout": "default",
+    "folder_label": "last",  # "last", "two", "full", "off"
+    "button_labels": True,   # show folder name on Stream Deck buttons
+    "overlay_label": True,   # show folder name bar on screen overlay
     "colors": {
         "active":     _rgb_to_hex(COLOR_BG_ACTIVE),
         "idle":       _rgb_to_hex(COLOR_BG_IDLE),
@@ -279,6 +313,7 @@ CONFIG_DEFAULTS = {
         "num_5":      _rgb_to_hex(COLOR_BG_NUM_5),
         "arrows":     _rgb_to_hex(COLOR_BG_NAV_ARROW),
         "mic_enter":  _rgb_to_hex(COLOR_BG_NAV_ACTION),
+        "label_text": "#000000",
     },
 }
 
@@ -294,14 +329,18 @@ class DeckController:
         self.screen = self._get_screen_bounds()
         self._init_fonts()
         self.slot_tty = {}            # slot -> tty name (e.g. "ttys003")
+        self.slot_cwd = {}            # slot -> cwd path string
         self.slot_status = {}         # slot -> "idle"|"working"|"permission"|None
         self.blink_on = True          # toggles every BLINK_INTERVAL for red blink
         self._last_blink_toggle = time.time()
         self.overlay_proc = None      # subprocess for screen border overlay
         self._last_tty_refresh = 0    # force immediate TTY map build
+        self._last_active_cwd_check = 0  # fast CWD refresh for active slot
+
         # Snap-to-grid: track window positions to detect drag-and-drop
         self._prev_win_positions = {}   # window_id -> (x, y, w, h)
         self._snap_candidates = {}     # window_id -> {pos, polls_stable, win}
+        self._controller_win_id = None  # Quartz window ID of the controller terminal
 
     # ─── Config ───────────────────────────────────────────────────────
 
@@ -319,8 +358,8 @@ class DeckController:
                 config["colors"].update(saved["colors"])
                 del saved["colors"]
             config.update(saved)
-        except (FileNotFoundError, json.JSONDecodeError):
-            pass
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            logger.debug("Config load skipped: %s", e)
         return config
 
     def _save_config(self):
@@ -332,7 +371,7 @@ class DeckController:
                 f.write("\n")
             os.rename(tmp, CONFIG_FILE)
         except Exception as e:
-            print(f"[config] Failed to save: {e}")
+            logger.error("Config save failed: %s", e)
 
     def _color(self, key, fallback):
         """Get a color from config, falling back to the constant."""
@@ -341,8 +380,8 @@ class DeckController:
         if h:
             try:
                 return _hex_to_rgb(h)
-            except (ValueError, IndexError):
-                pass
+            except (ValueError, IndexError) as e:
+                logger.debug("Invalid color hex for '%s': %s", key, e)
         return fallback
 
     # ─── Layout ──────────────────────────────────────────────────────
@@ -536,7 +575,7 @@ class DeckController:
         w = int(disp_bounds.size.width)
         h = int(disp_bounds.size.height) - menu_bar_h - dock_h
 
-        print(f"[screen] Display at ({x}, {y}), {w}x{h}, menu_bar={menu_bar_h}px, dock={dock_h}px")
+        logger.info("Display at (%d, %d), %dx%d, menu_bar=%dpx, dock=%dpx", x, y, w, h, menu_bar_h, dock_h)
         return {"x": x, "y": y, "w": w, "h": h}
 
     def _init_fonts(self):
@@ -552,12 +591,14 @@ class DeckController:
                 try:
                     return ImageFont.truetype(path, size)
                 except (IOError, OSError):
+                    logger.debug("Font not found: %s", path)
                     continue
             return ImageFont.load_default()
 
         self.font_sm = load(12)
         self.font_md = load(18)
         self.font_lg = load(26)
+        self.font_xs = load(9)
 
     def _pick_font(self, label):
         if len(label) <= 2:
@@ -571,7 +612,9 @@ class DeckController:
     def _build_tty_map(self):
         """Map each terminal's primary slot to its TTY.
         Uses AppleScript to get the TTY for each window (per app), then
-        matches window positions to layout terminal zones."""
+        matches window positions to layout terminal zones.
+        Only the first (frontmost) window per zone is used — behind
+        windows at the same position are ignored."""
         tty_map = {}
 
         # Get TTY + bounds for each window, grouped by app
@@ -581,6 +624,8 @@ class DeckController:
                 continue
 
             # Match each window to a terminal zone by position
+            # Skip zones already claimed — AppleScript returns front-to-back,
+            # so the first match is the frontmost window at that position.
             for info in window_ttys:
                 win_cx = info["x"] + info["w"] / 2
                 win_cy = info["y"] + info["h"] / 2
@@ -589,10 +634,84 @@ class DeckController:
                     if (r["x"] <= win_cx <= r["x"] + r["w"]
                             and r["y"] <= win_cy <= r["y"] + r["h"]):
                         primary = self._terminal_to_active_slot(name)
-                        tty_map[primary] = info["tty"]
+                        if primary not in tty_map:
+                            tty_map[primary] = info["tty"]
                         break
 
         self.slot_tty = tty_map
+
+        # Resolve CWD for each mapped TTY
+        cwd_map = {}
+        for slot, tty in tty_map.items():
+            cwd = self._resolve_tty_cwd(tty)
+            if cwd:
+                cwd_map[slot] = cwd
+        logger.debug("TTY map: %s", tty_map)
+        logger.debug("CWD map: %s", {s: Path(c).name for s, c in cwd_map.items()})
+        self.slot_cwd = cwd_map
+
+    def _resolve_tty_cwd(self, tty_name):
+        """Get the working directory of the most recent shell on a TTY.
+        Uses the last shell process (innermost/newest), which reflects
+        the current working directory even inside Claude Code sessions.
+        Returns the path string, or None if it can't be resolved."""
+        try:
+            # Find all shell PIDs on this TTY (ps lists oldest first)
+            result = subprocess.run(
+                ["ps", "-t", tty_name, "-o", "pid=,comm="],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode != 0:
+                return None
+
+            shell_pid = None
+            for line in result.stdout.strip().split("\n"):
+                parts = line.strip().split(None, 1)
+                if len(parts) == 2:
+                    comm = parts[1].strip().lstrip("-")
+                    if comm in ("zsh", "bash", "fish"):
+                        shell_pid = parts[0].strip()  # keep overwriting — last one wins
+            if not shell_pid:
+                return None
+
+            # Get CWD from the shell process
+            result = subprocess.run(
+                ["lsof", "-a", "-p", shell_pid, "-d", "cwd", "-Fn"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode != 0:
+                return None
+
+            for line in result.stdout.strip().split("\n"):
+                if line.startswith("n"):
+                    return line[1:]  # strip the 'n' prefix
+            return None
+        except Exception:
+            logger.debug("Failed to resolve CWD for %s", tty_name, exc_info=True)
+            return None
+
+    def _format_cwd(self, path):
+        """Format a CWD path according to the folder_label config setting.
+        Returns the formatted string for display."""
+        if not path:
+            return None
+        mode = self.config.get("folder_label", "last")
+        if mode == "off":
+            return None
+
+        home = str(Path.home())
+        if path.startswith(home):
+            tilde_path = "~" + path[len(home):]
+        else:
+            tilde_path = path
+
+        if mode == "full":
+            return tilde_path
+        elif mode == "two":
+            parts = Path(path).parts
+            return "/".join(parts[-2:]) if len(parts) >= 2 else parts[-1]
+        else:  # "last"
+            return Path(path).name
 
     def _get_app_window_ttys(self, app_name):
         """Get TTY and bounds for each window of a terminal app via AppleScript.
@@ -614,27 +733,21 @@ tell application "Terminal"
 end tell
 '''
         elif app_name in ("iTerm2", "iTerm"):
-            # iTerm2: use System Events for position/size, iTerm2 for tty
+            # iTerm2: get bounds + tty entirely from iTerm2 scripting.
+            # Previous approach mixed System Events (position) with iTerm2 (tty),
+            # which could mismatch when window ordering differs between the two.
             script = '''
-set output to ""
 tell application "iTerm2"
-    set winCount to count of windows
+    set output to ""
+    repeat with i from 1 to count of windows
+        try
+            set b to bounds of window i
+            set t to tty of current session of current tab of window i
+            set output to output & (item 1 of b as text) & "," & (item 2 of b as text) & "," & (item 3 of b as text) & "," & (item 4 of b as text) & "," & t & linefeed
+        end try
+    end repeat
+    return output
 end tell
-tell application "System Events"
-    tell process "iTerm2"
-        repeat with i from 1 to winCount
-            try
-                set p to position of window i
-                set s to size of window i
-                tell application "iTerm2"
-                    set t to tty of current session of current tab of window i
-                end tell
-                set output to output & (item 1 of p as text) & "," & (item 2 of p as text) & "," & ((item 1 of p) + (item 1 of s) as text) & "," & ((item 2 of p) + (item 2 of s) as text) & "," & t & linefeed
-            end try
-        end repeat
-    end tell
-end tell
-return output
 '''
         else:
             return []
@@ -664,10 +777,12 @@ return output
                             "w": right - left, "h": bottom - top,
                             "tty": tty,
                         })
-                    except ValueError:
+                    except ValueError as e:
+                        logger.debug("Skipping malformed window line: %s", e)
                         continue
             return windows
         except Exception:
+            logger.warning("Failed to get terminal windows", exc_info=True)
             return []
 
     def _read_status_files(self):
@@ -717,7 +832,8 @@ return output
                 slot = tty_to_slot.get(tty)
                 if slot is not None:
                     new_status[slot] = state
-            except (json.JSONDecodeError, IOError):
+            except (json.JSONDecodeError, IOError) as e:
+                logger.debug("Skipping status file: %s", e)
                 continue
 
         self.slot_status = new_status
@@ -730,7 +846,7 @@ return output
         try:
             Path(OVERLAY_FILE).unlink(missing_ok=True)
         except Exception:
-            pass
+            logger.warning("Failed to clean stale overlay file", exc_info=True)
 
         script_dir = os.path.dirname(os.path.abspath(__file__))
         overlay_script = os.path.join(script_dir, "overlay.py")
@@ -746,6 +862,7 @@ return output
                 log_file = open(log_path, "w")
                 self._overlay_log = log_file  # keep ref so fd stays open
             except PermissionError:
+                logger.debug("Overlay log file permission denied, discarding output")
                 # Stale root-owned log from previous sudo run — discard output
                 log_file = open(os.devnull, "w")
             self.overlay_proc = subprocess.Popen(
@@ -753,8 +870,8 @@ return output
                 stdout=log_file, stderr=log_file,
                 start_new_session=True,
             )
-        except Exception as e:
-            print(f"[overlay] Failed to start overlay: {e}")
+        except Exception:
+            logger.error("Failed to start overlay", exc_info=True)
             self.overlay_proc = None
 
     def _stop_overlay(self):
@@ -764,16 +881,17 @@ return output
                 self.overlay_proc.terminate()
                 self.overlay_proc.wait(timeout=3)
             except Exception:
+                logger.warning("Overlay terminate failed, attempting kill", exc_info=True)
                 try:
                     self.overlay_proc.kill()
                 except Exception:
-                    pass
+                    logger.warning("Overlay kill also failed", exc_info=True)
             self.overlay_proc = None
         # Remove overlay file
         try:
             Path(OVERLAY_FILE).unlink(missing_ok=True)
         except Exception:
-            pass
+            logger.warning("Failed to remove overlay file", exc_info=True)
 
     def _update_overlay(self):
         """Write active window position to the overlay file (atomic)."""
@@ -782,10 +900,15 @@ return output
             terminal_name = self._key_to_terminal(self.active_slot)
             rect = self._get_terminal_rect(terminal_name) if terminal_name else self._grid_rect(self.active_slot)
             active_color = self._color("active", COLOR_BG_ACTIVE)
+            raw_cwd = self.slot_cwd.get(self.active_slot)
+            formatted_cwd = self._format_cwd(raw_cwd) if raw_cwd and self.config.get("overlay_label", True) else None
+            label_text_color = self._color("label_text", (0, 0, 0))
             data = {"visible": True,
                     "x": rect["x"], "y": rect["y"],
                     "w": rect["w"], "h": rect["h"],
-                    "color": list(active_color)}
+                    "color": list(active_color),
+                    "cwd": formatted_cwd,
+                    "label_text_color": list(label_text_color)}
         else:
             data = {"visible": False}
 
@@ -794,7 +917,7 @@ return output
             tmp.write_text(json.dumps(data))
             tmp.rename(overlay_path)
         except Exception:
-            pass
+            logger.warning("Failed to write overlay file", exc_info=True)
 
     # ─── Grid Geometry ───────────────────────────────────────────────
 
@@ -820,15 +943,15 @@ return output
         try:
             tty_path = os.ttyname(sys.stdin.fileno())
             return tty_path.replace("/dev/", "")
-        except (OSError, AttributeError):
-            pass
+        except (OSError, AttributeError) as e:
+            logger.debug("TTY detection via stdin failed: %s", e)
         # Fallback: tty command
         try:
             result = subprocess.run(["tty"], capture_output=True, text=True, timeout=2)
             if result.returncode == 0 and result.stdout.strip() != "not a tty":
                 return result.stdout.strip().replace("/dev/", "")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("TTY detection via tty command failed: %s", e)
         return None
 
     def _find_controller_window(self, term_wins):
@@ -850,13 +973,22 @@ return output
                             return win
         return None
 
+    def _refresh_controller_win_id(self):
+        """Update the cached controller window ID by re-matching TTY."""
+        term_wins = self._get_terminal_windows()
+        controller_win = self._find_controller_window(term_wins)
+        if controller_win:
+            self._controller_win_id = controller_win["id"]
+        else:
+            self._controller_win_id = None
+
     def tile_windows(self):
         """Arrange terminal windows according to the current layout.
         The controller's own terminal is always placed in slot 14 (bottom-right).
         Remaining windows are matched to layout terminals by proximity."""
         term_wins = self._get_terminal_windows()
         if not term_wins:
-            print("[tile] No terminal windows found.")
+            logger.warning("No terminal windows found")
             return
 
         # Find the controller's own terminal window by TTY
@@ -869,15 +1001,18 @@ return output
 
         # Place controller window in slot 14 (bottom-right, always single cell)
         if controller_win:
-            print(f"[tile] Controller terminal → slot 14")
+            logger.info("Controller terminal -> slot 14")
             self._move_window_to_rect(controller_win, self._grid_rect(GRID_SLOTS - 1))
+            self._controller_win_id = controller_win["id"]
+        else:
+            self._controller_win_id = None
 
         # Get terminal zones from layout
         terminal_names = self._get_terminal_names()
         terminal_rects = {name: self._get_terminal_rect(name) for name in terminal_names}
 
         count = min(len(other_wins), len(terminal_names))
-        print(f"[tile] Found {len(term_wins)} terminal window(s), tiling {count} into layout '{self.config.get('layout', 'default')}'")
+        logger.info("Found %d terminal window(s), tiling %d into layout '%s'", len(term_wins), count, self.config.get('layout', 'default'))
 
         # Match windows to terminal zones by proximity
         assignments = self._match_windows_to_terminals(other_wins[:count], terminal_names, terminal_rects)
@@ -1000,12 +1135,19 @@ end tell
                     if cand["polls_stable"] >= SNAP_SETTLE_POLLS:
                         # Window has settled — snap if not already in a slot
                         if not self._is_snapped(win):
-                            best_terminal = self._find_nearest_empty_terminal(win)
-                            if best_terminal is not None:
-                                r = self._get_terminal_rect(best_terminal)
-                                print(f"[snap] Snapping window to {best_terminal}")
+                            # Controller always snaps to slot 14
+                            if wid == self._controller_win_id:
+                                r = self._grid_rect(ENTER_KEY_INDEX)
+                                logger.info("Snapping controller window to slot 14")
                                 self._move_window_to_rect(win, r)
                                 snapped_any = True
+                            else:
+                                best_terminal = self._find_nearest_empty_terminal(win)
+                                if best_terminal is not None:
+                                    r = self._get_terminal_rect(best_terminal)
+                                    logger.info("Snapping window to %s", best_terminal)
+                                    self._move_window_to_rect(win, r)
+                                    snapped_any = True
                         del self._snap_candidates[wid]
                 else:
                     # Moved again to a new spot — reset
@@ -1022,6 +1164,7 @@ end tell
             self._snap_candidates.clear()
             # Rebuild TTY map since windows moved
             self._build_tty_map()
+            self._update_overlay()
         else:
             self._prev_win_positions = current_positions
 
@@ -1130,9 +1273,6 @@ end tell
             kCGNullWindowID,
         )
         for w in windows or []:
-            owner = w.get("kCGWindowOwnerName", "")
-            if owner not in TERMINAL_APPS:
-                continue
             layer = w.get("kCGWindowLayer", 0)
             if layer != 0:  # normal windows are layer 0
                 continue
@@ -1141,6 +1281,14 @@ end tell
             bh = bounds.get("Height", 0)
             if bw < 100 or bh < 100:
                 continue
+            # First real window — if it's not a terminal app, no terminal is frontmost
+            owner = w.get("kCGWindowOwnerName", "")
+            if owner not in TERMINAL_APPS:
+                return None
+            # If this is the controller window, always slot 14
+            win_id = w.get("kCGWindowNumber", 0)
+            if win_id and win_id == self._controller_win_id:
+                return ENTER_KEY_INDEX
             win_cx = bounds.get("X", 0) + bw / 2
             win_cy = bounds.get("Y", 0) + bh / 2
             # Match against terminal zones (handles merged slots)
@@ -1189,8 +1337,8 @@ end tell
             try:
                 subprocess.Popen(mic_cmd, shell=True,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except Exception as e:
-                print(f"[mic] Command failed: {e}")
+            except Exception:
+                logger.warning("MIC command failed", exc_info=True)
 
     def _learn_keystroke(self):
         """Listen for a single keystroke and save it as the MIC action.
@@ -1231,6 +1379,7 @@ end tell
         )
 
         if tap is None:
+            logger.error("Failed to create event tap — check Accessibility permissions")
             print("  Failed to create event tap — check Accessibility permissions")
             return
 
@@ -1279,9 +1428,10 @@ end tell
     # ─── Button Rendering ────────────────────────────────────────────
 
     def _render_button(self, label, bg=COLOR_BG_DEFAULT, fg=COLOR_FG_DEFAULT,
-                       border_color=None, border_width=8):
+                       border_color=None, border_width=8, subtitle=None):
         """Create a button image for the Stream Deck.
-        If border_color is set, draws a colored border around the button."""
+        If border_color is set, draws a colored border around the button.
+        If subtitle is set, draws a dark bar across the top with the subtitle text."""
         image = PILHelper.create_image(self.deck, background=bg)
         draw = ImageDraw.Draw(image)
         w, h = image.size
@@ -1294,12 +1444,33 @@ end tell
                     outline=border_color,
                 )
 
+        # Draw subtitle bar across top
+        bar_h = 0
+        if subtitle:
+            bar_h = 16
+            draw.rectangle([0, 0, w, bar_h], fill=(0, 0, 0, 153))
+            # Truncate subtitle if too wide
+            sub_bbox = draw.textbbox((0, 0), subtitle, font=self.font_xs)
+            sub_tw = sub_bbox[2] - sub_bbox[0]
+            if sub_tw > w - 4:
+                while sub_tw > w - 10 and len(subtitle) > 3:
+                    subtitle = subtitle[:-1]
+                    sub_bbox = draw.textbbox((0, 0), subtitle + "…", font=self.font_xs)
+                    sub_tw = sub_bbox[2] - sub_bbox[0]
+                subtitle = subtitle + "…"
+                sub_bbox = draw.textbbox((0, 0), subtitle, font=self.font_xs)
+                sub_tw = sub_bbox[2] - sub_bbox[0]
+            sub_x = (w - sub_tw) / 2
+            sub_y = (bar_h - (sub_bbox[3] - sub_bbox[1])) / 2 - 1
+            draw.text((sub_x, sub_y), subtitle, font=self.font_xs, fill=(255, 255, 255))
+
+        # Draw main label (shifted down if subtitle present)
         font = self._pick_font(label)
         bbox = draw.textbbox((0, 0), label, font=font)
         tw = bbox[2] - bbox[0]
         th = bbox[3] - bbox[1]
         x = (w - tw) / 2
-        y = (h - th) / 2 - 2
+        y = (h - th) / 2 - 2 + (bar_h / 2 if bar_h else 0)
         draw.text((x, y), label, font=font, fill=fg)
         return PILHelper.to_native_format(self.deck, image)
 
@@ -1347,10 +1518,15 @@ end tell
         for i in range(DECK_TERMINAL_SLOTS):
             label = layout[i] if i < len(layout) else f"T{i+1}"
             bg, fg, border = self._get_slot_style(i)
+            # Resolve CWD subtitle for this slot
+            terminal_name = self._key_to_terminal(i)
+            primary = self._terminal_to_active_slot(terminal_name) if terminal_name else i
+            raw_cwd = self.slot_cwd.get(primary)
+            subtitle = self._format_cwd(raw_cwd) if raw_cwd and self.config.get("button_labels", True) else None
             self.deck.set_key_image(
-                i, self._render_button(label, bg, fg, border_color=border)
+                i, self._render_button(label, bg, fg, border_color=border, subtitle=subtitle)
             )
-        # Enter key (always present)
+        # Enter key (always present, no subtitle)
         self.deck.set_key_image(
             ENTER_KEY_INDEX,
             self._render_button("⏎", COLOR_BG_ENTER, COLOR_FG_ENTER),
@@ -1474,6 +1650,7 @@ end tell
 
     def _poll_active_loop(self):
         """Background thread: sync active_slot and Claude status with the grid."""
+        consecutive_errors = 0
         while self.running:
             try:
                 if self.mode == MODE_GRID:
@@ -1482,8 +1659,13 @@ end tell
                     # Periodically refresh TTY map so new/changed terminals get picked up
                     now_tty = time.time()
                     if now_tty - self._last_tty_refresh >= TTY_MAP_REFRESH_SEC:
+                        old_cwd = dict(self.slot_cwd)
                         self._build_tty_map()
+                        self._refresh_controller_win_id()
                         self._last_tty_refresh = now_tty
+                        if self.slot_cwd != old_cwd:
+                            self._update_overlay()
+                            needs_redraw = True
 
                     # Snap-to-grid: detect dragged windows and snap them
                     if self.config["snap_enabled"] and self._check_snap_to_grid():
@@ -1491,10 +1673,22 @@ end tell
 
                     # Check frontmost window
                     slot = self._get_frontmost_slot()
-                    if slot is not None and slot != self.active_slot:
-                        self.active_slot = slot
+                    if slot != self.active_slot:
+                        self.active_slot = slot  # None when non-terminal is frontmost
                         self._update_overlay()
                         needs_redraw = True
+
+                    # Fast CWD refresh for active slot only (every 5s)
+                    if self.active_slot is not None and now_tty - self._last_active_cwd_check >= ACTIVE_CWD_REFRESH_SEC:
+                        tty = self.slot_tty.get(self.active_slot)
+                        if tty:
+                            cwd = self._resolve_tty_cwd(tty)
+                            old_cwd = self.slot_cwd.get(self.active_slot)
+                            if cwd and cwd != old_cwd:
+                                self.slot_cwd[self.active_slot] = cwd
+                                self._update_overlay()
+                                needs_redraw = True
+                        self._last_active_cwd_check = now_tty
 
                     # Read Claude Code status from hook files
                     old_status = dict(self.slot_status)
@@ -1513,8 +1707,13 @@ end tell
 
                     if needs_redraw:
                         self._update_all_buttons()
+
+                consecutive_errors = 0
             except Exception:
-                pass  # Don't crash the poller
+                consecutive_errors += 1
+                if consecutive_errors <= 10 or consecutive_errors % 100 == 0:
+                    level = logging.ERROR if consecutive_errors >= 10 else logging.WARNING
+                    logger.log(level, "Poll loop error (consecutive: %d)", consecutive_errors, exc_info=True)
             time.sleep(self.config["poll_interval"])
 
     # ─── REPL Commands ────────────────────────────────────────────────
@@ -1666,22 +1865,24 @@ end tell
 
         devices = DeviceManager().enumerate()
         if not devices:
+            logger.error("No Stream Deck found")
             print("No Stream Deck found. Make sure it's plugged in.")
             print("Also verify: brew install hidapi && pip install streamdeck")
             sys.exit(1)
 
         # The Stream Deck Original exposes multiple HID interfaces.
         # Try each until one opens successfully.
-        print(f"Found {len(devices)} HID interface(s), attempting to open...")
+        logger.info("Found %d HID interface(s), attempting to open...", len(devices))
         for i, dev in enumerate(devices):
             try:
                 dev.open()
                 self.deck = dev
-                print(f"  Opened interface {i}: {dev.deck_type()}")
+                logger.info("Opened interface %d: %s", i, dev.deck_type())
                 break
             except Exception as e:
-                print(f"  Interface {i} failed: {e}")
+                logger.warning("Interface %d failed: %s", i, e)
         else:
+            logger.error("Could not open any Stream Deck interface")
             print("ERROR: Could not open any Stream Deck interface.")
             print("If this is a permissions issue, try: sudo python main.py")
             sys.exit(1)
@@ -1690,14 +1891,15 @@ end tell
         self.deck.set_brightness(self.config["brightness"])
 
         key_count = self.deck.key_count()
-        print(f"Connected: {self.deck.deck_type()} ({key_count} keys)")
+        logger.info("Connected: %s (%d keys)", self.deck.deck_type(), key_count)
 
         if key_count != TOTAL_KEYS:
+            logger.warning("Expected %d keys but deck has %d — layout may not work correctly", TOTAL_KEYS, key_count)
             print(f"Warning: this script expects {TOTAL_KEYS} keys but your deck has {key_count}.")
             print("The key layout may not work correctly.")
 
         # Tile windows into grid
-        print("Tiling terminal windows...")
+        logger.info("Tiling terminal windows...")
         self.tile_windows()
         time.sleep(0.3)
 
@@ -1714,6 +1916,7 @@ end tell
             try:
                 f.unlink()
             except PermissionError:
+                logger.debug("Could not unlink %s, falling back to rm", f)
                 subprocess.run(["rm", "-f", str(f)], capture_output=True)
 
         # Initial render
@@ -1723,7 +1926,7 @@ end tell
         self.deck.set_key_callback(self._on_key_change)
 
         # Start screen border overlay
-        print("Starting screen overlay...")
+        logger.info("Starting screen overlay...")
         self._start_overlay()
 
         # Start settings server
@@ -1811,6 +2014,7 @@ end tell
                             f.write("\n")
                         os.rename(tmp, CONFIG_FILE)
                     except Exception as e:
+                        logger.error("Settings API: config save failed", exc_info=True)
                         self._json_response({"ok": False, "error": str(e)}, 500)
                         return
                     old_layout = controller_ref.config.get("layout")
@@ -1819,7 +2023,7 @@ end tell
                         try:
                             controller_ref.deck.set_brightness(new_config.get("brightness", 80))
                         except Exception:
-                            pass
+                            logger.warning("Failed to set brightness via settings API", exc_info=True)
                         # Re-tile if layout changed
                         if new_config.get("layout") != old_layout:
                             controller_ref.tile_windows()
@@ -1853,6 +2057,7 @@ end tell
                 self._settings_port = port
                 return port
             except OSError:
+                logger.debug("Port %d in use, trying next", port)
                 continue
         return None
 

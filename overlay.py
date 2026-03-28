@@ -23,6 +23,9 @@ from AppKit import (
     NSWindowStyleMaskBorderless,
     NSBackingStoreBuffered,
     NSFloatingWindowLevel,
+    NSTextField,
+    NSFont,
+    NSTextAlignmentCenter,
 )
 from Foundation import NSObject, NSAutoreleasePool
 from Quartz import CGMainDisplayID, CGDisplayBounds, CGColorCreateGenericRGB
@@ -83,6 +86,66 @@ def hide_overlay(win):
     win.orderOut_(None)
 
 
+LABEL_HEIGHT = 26     # pixels for the folder label bar
+
+
+def create_label_window():
+    """Create a window for the folder label bar at the top of the overlay."""
+    frame = ((0, 0), (1, 1))
+    win = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+        frame,
+        NSWindowStyleMaskBorderless,
+        NSBackingStoreBuffered,
+        False,
+    )
+    win.setLevel_(NSFloatingWindowLevel + 2)  # above the border overlay
+    win.setOpaque_(False)
+    win.setBackgroundColor_(NSColor.clearColor())
+    win.setIgnoresMouseEvents_(True)
+    win.setHasShadow_(False)
+    win.setCollectionBehavior_(1 << 0)  # canJoinAllSpaces
+
+    # Use CALayer for rounded corners on the background
+    view = win.contentView()
+    view.setWantsLayer_(True)
+    layer = view.layer()
+    # Default amber — will be updated dynamically from IPC color
+    r, g, b = AMBER
+    layer.setBackgroundColor_(CGColorCreateGenericRGB(r / 255.0, g / 255.0, b / 255.0, 1.0))
+    layer.setCornerRadius_(CORNER_RADIUS)
+    # Only round top corners by masking bottom
+    layer.setMaskedCorners_(1 << 2 | 1 << 3)  # kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner (AppKit top = visual top)
+
+    # Create text field — no background, vertically centered via frame offset
+    label = NSTextField.alloc().initWithFrame_(((0, 0), (1, LABEL_HEIGHT)))
+    label.setBezeled_(False)
+    label.setDrawsBackground_(False)
+    label.setEditable_(False)
+    label.setSelectable_(False)
+    label.setAlignment_(NSTextAlignmentCenter)
+    label.setFont_(NSFont.boldSystemFontOfSize_(16.0))
+    label.setTextColor_(NSColor.blackColor())  # default — updated dynamically
+
+    view.addSubview_(label)
+    return win, label
+
+
+def show_label(win, label_field, primary_h, qx, qy, qw):
+    """Position the label window at the top of the overlay rect."""
+    ns_y = primary_h - qy - LABEL_HEIGHT
+    win.setFrame_display_(((qx, ns_y), (qw, LABEL_HEIGHT)), True)
+    # Center text vertically — offset the text field down slightly
+    text_h = 20  # approximate height of 16pt bold text
+    y_offset = (LABEL_HEIGHT - text_h) / 2
+    label_field.setFrame_(((0, y_offset), (qw, text_h)))
+    win.orderFront_(None)
+
+
+def hide_label(win):
+    """Hide the label window."""
+    win.orderOut_(None)
+
+
 # ── NSObject subclass (only the timer callback) ─────────────────────
 
 class OverlayTick(NSObject):
@@ -94,12 +157,15 @@ class OverlayTick(NSObject):
         if self is None:
             return None
 
-        main_bounds = CGDisplayBounds(CGMainDisplayID())
-        self.primary_h = main_bounds.size.height
         self.win = create_overlay_window()
         self.visible = False
         self.last_rect = None
         self.last_color = None
+        self.label_win, self.label_field = create_label_window()
+        self.last_cwd = None
+        self.label_visible = False
+        self.last_label_bg = None
+        self.last_label_text = None
 
         return self
 
@@ -126,21 +192,60 @@ class OverlayTick(NSObject):
                     self._update_border_color(tuple(color_list))
 
                 rect = (data["x"], data["y"], data["w"], data["h"])
-                if rect != self.last_rect or not self.visible:
-                    show_overlay(self.win, self.primary_h, *rect)
+                overlay_moved = rect != self.last_rect or not self.visible
+                if overlay_moved:
+                    primary_h = CGDisplayBounds(CGMainDisplayID()).size.height
+                    show_overlay(self.win, primary_h, *rect)
                     self.last_rect = rect
                     self.visible = True
+
+                # Show/hide folder label
+                cwd = data.get("cwd")
+                if cwd:
+                    # Update label bar background to match active color
+                    if color_list and tuple(color_list) != self.last_label_bg:
+                        r, g, b = color_list
+                        bg_color = CGColorCreateGenericRGB(r / 255, g / 255, b / 255, 1.0)
+                        self.label_win.contentView().layer().setBackgroundColor_(bg_color)
+                        self.last_label_bg = tuple(color_list)
+
+                    # Update label text color
+                    text_color = data.get("label_text_color")
+                    if text_color and len(text_color) == 3 and tuple(text_color) != self.last_label_text:
+                        r, g, b = text_color
+                        self.label_field.setTextColor_(
+                            NSColor.colorWithCalibratedRed_green_blue_alpha_(r / 255.0, g / 255.0, b / 255.0, 1.0)
+                        )
+                        self.last_label_text = tuple(text_color)
+
+                    if cwd != self.last_cwd or overlay_moved or not self.label_visible:
+                        self.label_field.setStringValue_(cwd)
+                        primary_h = CGDisplayBounds(CGMainDisplayID()).size.height
+                        show_label(self.label_win, self.label_field, primary_h, rect[0], rect[1], rect[2])
+                        self.label_visible = True
+                    self.last_cwd = cwd
+                else:
+                    if self.label_visible:
+                        hide_label(self.label_win)
+                        self.label_visible = False
+                        self.last_cwd = None
             else:
                 if self.visible:
                     hide_overlay(self.win)
+                    hide_label(self.label_win)
                     self.visible = False
+                    self.label_visible = False
                     self.last_rect = None
+                    self.last_cwd = None
 
         except (FileNotFoundError, json.JSONDecodeError, KeyError):
             if self.visible:
                 hide_overlay(self.win)
+                hide_label(self.label_win)
                 self.visible = False
+                self.label_visible = False
                 self.last_rect = None
+                self.last_cwd = None
 
 
 # ═══════════════════════════════════════════════════════════════════════

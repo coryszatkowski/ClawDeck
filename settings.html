@@ -434,6 +434,38 @@
       <option value="0">Never</option>
     </select>
   </div>
+  <div class="row">
+    <div>
+      <label>Folder Labels</label>
+      <div class="sublabel">Format for folder name display</div>
+    </div>
+    <select id="folder_label">
+      <option value="last" selected>Last folder</option>
+      <option value="two">Last two folders</option>
+      <option value="full">Full path</option>
+      <option value="off">Off</option>
+    </select>
+  </div>
+  <div class="row">
+    <div>
+      <label>Button Labels</label>
+      <div class="sublabel">Show folder name on Stream Deck buttons</div>
+    </div>
+    <div class="toggle">
+      <input type="checkbox" id="button_labels" checked>
+      <div class="slider"></div>
+    </div>
+  </div>
+  <div class="row">
+    <div>
+      <label>Overlay Label</label>
+      <div class="sublabel">Show folder name bar on screen overlay</div>
+    </div>
+    <div class="toggle">
+      <input type="checkbox" id="overlay_label" checked>
+      <div class="slider"></div>
+    </div>
+  </div>
 </div>
 
 <div class="section">
@@ -462,6 +494,10 @@
       <div class="color-item">
         <input type="color" id="color_active" value="#ffb000">
         <span>Active</span>
+      </div>
+      <div class="color-item">
+        <input type="color" id="color_label_text" value="#000000">
+        <span>Label Text</span>
       </div>
     </div>
   </div>
@@ -559,10 +595,13 @@
       document.getElementById('poll_interval').value = s.poll_interval || 0.2;
       document.getElementById('snap_enabled').checked = s.snap_enabled !== false;
       document.getElementById('idle_timeout').value = String(s.idle_timeout != null ? s.idle_timeout : 3600);
+      document.getElementById('folder_label').value = s.folder_label || 'last';
+      document.getElementById('button_labels').checked = s.button_labels !== false;
+      document.getElementById('overlay_label').checked = s.overlay_label !== false;
 
       // Colors
       const c = s.colors || {};
-      const colorFields = ['active','idle','working','permission','num_1','num_2','num_3','num_4','num_5','arrows','mic_enter'];
+      const colorFields = ['active','idle','working','permission','num_1','num_2','num_3','num_4','num_5','arrows','mic_enter','label_text'];
       colorFields.forEach(k => {
         const el = document.getElementById('color_' + k);
         if (el && c[k]) el.value = c[k];
@@ -589,10 +628,13 @@
       poll_interval: parseFloat(document.getElementById('poll_interval').value),
       snap_enabled: document.getElementById('snap_enabled').checked,
       idle_timeout: parseInt(document.getElementById('idle_timeout').value),
+      folder_label: document.getElementById('folder_label').value,
+      button_labels: document.getElementById('button_labels').checked,
+      overlay_label: document.getElementById('overlay_label').checked,
     };
 
     // Colors
-    const colorFields = ['active','idle','working','permission','num_1','num_2','num_3','num_4','num_5','arrows','mic_enter'];
+    const colorFields = ['active','idle','working','permission','num_1','num_2','num_3','num_4','num_5','arrows','mic_enter','label_text'];
     config.colors = {};
     colorFields.forEach(k => {
       const el = document.getElementById('color_' + k);
@@ -664,10 +706,12 @@
     document.getElementById('brightnessVal').textContent = this.value;
   });
 
-  // Toggle click handler
-  document.querySelector('.toggle').addEventListener('click', function() {
-    const cb = this.querySelector('input');
-    cb.checked = !cb.checked;
+  // Toggle click handlers
+  document.querySelectorAll('.toggle').forEach(function(toggle) {
+    toggle.addEventListener('click', function() {
+      const cb = this.querySelector('input');
+      cb.checked = !cb.checked;
+    });
   });
 
   // Load on start
